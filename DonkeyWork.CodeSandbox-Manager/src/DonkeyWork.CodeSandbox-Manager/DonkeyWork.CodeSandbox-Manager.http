@@ -1,0 +1,6 @@
+@DonkeyWork.CodeSandbox_Manager_HostAddress = http://localhost:5074
+
+GET {{DonkeyWork.CodeSandbox_Manager_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

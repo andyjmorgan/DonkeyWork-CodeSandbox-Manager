@@ -1,0 +1,46 @@
+version: '3.8'
+
+services:
+  kata-container-manager:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: kata-container-manager:latest
+    container_name: kata-container-manager
+    ports:
+      - "8668:8668"
+    environment:
+      - ASPNETCORE_URLS=http://+:8668
+      - ASPNETCORE_ENVIRONMENT=Development
+      # Kubernetes Configuration
+      - KataContainerManager__TargetNamespace=sandbox-containers
+      - KataContainerManager__RuntimeClassName=kata-qemu
+      - KataContainerManager__DefaultResourceRequests__MemoryMi=128
+      - KataContainerManager__DefaultResourceRequests__CpuMillicores=250
+      - KataContainerManager__DefaultResourceLimits__MemoryMi=512
+      - KataContainerManager__DefaultResourceLimits__CpuMillicores=1000
+      - KataContainerManager__PodNamePrefix=kata-sandbox
+      - KataContainerManager__CleanupCompletedPods=true
+      - KataContainerManager__PodReadyTimeoutSeconds=90
+      # Serilog Configuration
+      - Serilog__MinimumLevel__Default=Information
+      - Serilog__MinimumLevel__Override__Microsoft=Warning
+      - Serilog__MinimumLevel__Override__System=Warning
+    volumes:
+      # Mount kubeconfig for local development
+      # Uncomment the following line if running locally outside Kubernetes
+      # - ~/.kube/config:/root/.kube/config:ro
+      - /tmp/kata-manager-logs:/tmp/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8668/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - kata-network
+
+networks:
+  kata-network:
+    driver: bridge

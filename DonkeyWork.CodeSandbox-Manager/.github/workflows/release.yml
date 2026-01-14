@@ -1,0 +1,303 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'src/**'
+      - 'Dockerfile'
+      - '.github/workflows/release.yml'
+      - 'docker-compose.yml'
+      - '*.sln'
+
+env:
+  DOTNET_VERSION: '10.0.x'
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: 1
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: 1
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+permissions:
+  contents: write
+  packages: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  build-and-test:
+    name: Build and Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+          cache: true
+          cache-dependency-path: '**/packages.lock.json'
+
+      - name: Restore dependencies
+        run: dotnet restore DonkeyWork.CodeSandbox-Manager.sln
+
+      - name: Build solution
+        run: dotnet build DonkeyWork.CodeSandbox-Manager.sln --configuration Release --no-restore
+
+      - name: Run unit tests
+        run: |
+          dotnet test DonkeyWork.CodeSandbox-Manager.sln \
+            --configuration Release \
+            --no-build \
+            --verbosity normal \
+            --logger "trx;LogFileName=test-results.trx" \
+            --collect:"XPlat Code Coverage" \
+            --results-directory ./TestResults
+        continue-on-error: false
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results
+          path: ./TestResults
+          retention-days: 90
+
+  semantic-version:
+    name: Determine Version
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    outputs:
+      version: ${{ steps.semver.outputs.version }}
+      tag: ${{ steps.semver.outputs.tag }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install GitVersion
+        uses: gittools/actions/gitversion/setup@v1
+        with:
+          versionSpec: '5.x'
+
+      - name: Determine Version
+        id: gitversion
+        uses: gittools/actions/gitversion/execute@v1
+        with:
+          useConfigFile: false
+
+      - name: Set semantic version
+        id: semver
+        run: |
+          VERSION="${{ steps.gitversion.outputs.semVer }}"
+          TAG="v${VERSION}"
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+          echo "Determined version: ${VERSION}"
+          echo "Tag will be: ${TAG}"
+
+  docker-build-push:
+    name: Build and Push Docker Image
+    runs-on: ubuntu-latest
+    needs: [build-and-test, semantic-version]
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          platforms: linux/amd64,linux/arm64
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=semver,pattern={{version}},value=${{ needs.semantic-version.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ needs.semantic-version.outputs.version }}
+            type=semver,pattern={{major}},value=${{ needs.semantic-version.outputs.version }}
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+          labels: |
+            org.opencontainers.image.title=Kata Container Manager
+            org.opencontainers.image.description=REST API for managing Kata containers in Kubernetes
+            org.opencontainers.image.vendor=DonkeyWork
+            org.opencontainers.image.version=${{ needs.semantic-version.outputs.version }}
+
+      - name: Build and push Docker image
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64,linux/arm64
+          provenance: true
+          sbom: true
+
+      - name: Generate image digest summary
+        run: |
+          echo "## Docker Image Published" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Image:** \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** \`${{ needs.semantic-version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Digest:** \`${{ steps.build.outputs.digest }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Tags:" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "${{ steps.meta.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+
+  create-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [semantic-version, docker-build-push]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          # Get the previous tag
+          PREVIOUS_TAG=$(git describe --abbrev=0 --tags 2>/dev/null || echo "")
+
+          # Generate changelog
+          if [ -z "$PREVIOUS_TAG" ]; then
+            echo "## Initial Release" > CHANGELOG.md
+            echo "" >> CHANGELOG.md
+            echo "First release of the Kata Container Manager." >> CHANGELOG.md
+          else
+            echo "## What's Changed" > CHANGELOG.md
+            echo "" >> CHANGELOG.md
+            git log ${PREVIOUS_TAG}..HEAD --pretty=format:"* %s (%h)" --no-merges >> CHANGELOG.md
+          fi
+
+          echo "" >> CHANGELOG.md
+          echo "" >> CHANGELOG.md
+          echo "## Docker Images" >> CHANGELOG.md
+          echo "" >> CHANGELOG.md
+          echo "**Image:** \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.semantic-version.outputs.version }}\`" >> CHANGELOG.md
+          echo "" >> CHANGELOG.md
+          echo "### Pull the image:" >> CHANGELOG.md
+          echo "\`\`\`bash" >> CHANGELOG.md
+          echo "docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.semantic-version.outputs.version }}" >> CHANGELOG.md
+          echo "\`\`\`" >> CHANGELOG.md
+          echo "" >> CHANGELOG.md
+          echo "### Multi-architecture support:" >> CHANGELOG.md
+          echo "- linux/amd64" >> CHANGELOG.md
+          echo "- linux/arm64" >> CHANGELOG.md
+          echo "" >> CHANGELOG.md
+          echo "## Image Digest" >> CHANGELOG.md
+          echo "\`${{ needs.docker-build-push.outputs.digest }}\`" >> CHANGELOG.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ needs.semantic-version.outputs.tag }}
+          name: Release ${{ needs.semantic-version.outputs.version }}
+          body_path: CHANGELOG.md
+          draft: false
+          prerelease: false
+          token: ${{ secrets.GITHUB_TOKEN }}
+          generate_release_notes: true
+
+  update-deployment:
+    name: Update Kubernetes Deployment
+    runs-on: ubuntu-latest
+    needs: [semantic-version, docker-build-push, create-release]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Update deployment manifest
+        run: |
+          VERSION="${{ needs.semantic-version.outputs.version }}"
+          IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${VERSION}"
+
+          # Update the image in the deployment file
+          if [ -f "k8s/deployment.yaml" ]; then
+            sed -i "s|image:.*kata.*manager.*|image: ${IMAGE}|g" k8s/deployment.yaml
+            echo "Updated k8s/deployment.yaml with new image: ${IMAGE}"
+          fi
+
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "chore: update deployment to version ${{ needs.semantic-version.outputs.version }}"
+          title: "chore: update deployment to version ${{ needs.semantic-version.outputs.version }}"
+          body: |
+            ## Automated Deployment Update
+
+            This PR updates the Kubernetes deployment manifest to use the newly released version.
+
+            **Version:** ${{ needs.semantic-version.outputs.version }}
+            **Image:** ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.semantic-version.outputs.version }}
+            **Release:** ${{ needs.semantic-version.outputs.tag }}
+
+            This PR was automatically created by the release workflow.
+          branch: deployment/update-${{ needs.semantic-version.outputs.version }}
+          delete-branch: true
+          labels: |
+            automated
+            deployment
+
+  post-release-summary:
+    name: Post Release Summary
+    runs-on: ubuntu-latest
+    needs: [semantic-version, docker-build-push, create-release]
+    if: always()
+
+    steps:
+      - name: Generate release summary
+        run: |
+          echo "# Release Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Version Information" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version:** ${{ needs.semantic-version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Tag:** ${{ needs.semantic-version.outputs.tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Docker Image" >> $GITHUB_STEP_SUMMARY
+          echo "- **Registry:** ${{ env.REGISTRY }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image:** ${{ env.IMAGE_NAME }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Full Tag:** ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.semantic-version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Release Status" >> $GITHUB_STEP_SUMMARY
+          echo "- Build & Test: ${{ needs.build-and-test.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Docker Build & Push: ${{ needs.docker-build-push.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- GitHub Release: ${{ needs.create-release.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Quick Deploy" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+          echo "docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.semantic-version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "kubectl set image deployment/kata-manager-api kata-manager-api=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.semantic-version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY

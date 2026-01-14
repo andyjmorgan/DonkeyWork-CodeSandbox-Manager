@@ -1,0 +1,18 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kata-manager-role
+  namespace: sandbox-containers
+rules:
+  # Pod management permissions
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+  # Pod logs (optional, for debugging)
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  # Pod status (optional, for monitoring)
+  - apiGroups: [""]
+    resources: ["pods/status"]
+    verbs: ["get"]
