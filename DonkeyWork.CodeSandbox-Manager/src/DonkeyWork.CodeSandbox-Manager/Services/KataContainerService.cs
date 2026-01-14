@@ -27,7 +27,8 @@ public class KataContainerService : IKataContainerService
         CreateContainerRequest request,
         CancellationToken cancellationToken = default)
     {
-        _logger.LogInformation("Creating Kata container with image: {Image}", request.Image);
+        _logger.LogInformation("Creating Kata container with image: {Image}, WaitForReady: {WaitForReady}",
+            request.Image, request.WaitForReady);
 
         if (string.IsNullOrWhiteSpace(request.Image))
         {
@@ -52,6 +53,28 @@ public class KataContainerService : IKataContainerService
                 cancellationToken: cancellationToken);
 
             _logger.LogInformation("Successfully created Kata container: {PodName}", podName);
+
+            // If WaitForReady is true, wait for the pod to be ready before returning
+            if (request.WaitForReady)
+            {
+                _logger.LogInformation("Waiting for pod {PodName} to be ready (timeout: {TimeoutSeconds}s)",
+                    podName, _config.PodReadyTimeoutSeconds);
+
+                var isReady = await WaitForPodReadyAsync(podName, cancellationToken);
+
+                if (!isReady)
+                {
+                    _logger.LogWarning("Pod {PodName} did not become ready within timeout", podName);
+                }
+
+                // Fetch the latest pod state after waiting
+                var finalPod = await _client.CoreV1.ReadNamespacedPodAsync(
+                    podName,
+                    _config.TargetNamespace,
+                    cancellationToken: cancellationToken);
+
+                return MapPodToContainerInfo(finalPod);
+            }
 
             return MapPodToContainerInfo(createdPod);
         }
@@ -172,7 +195,7 @@ public class KataContainerService : IKataContainerService
         {
             ["app"] = "kata-manager",
             ["runtime"] = "kata",
-            ["managed-by"] = "csharp-service",
+            ["managed-by"] = "CodeSandbox-Manager",
             ["created-at"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString()
         };
 
@@ -283,6 +306,61 @@ public class KataContainerService : IKataContainerService
             Labels = pod.Metadata.Labels != null ? new Dictionary<string, string>(pod.Metadata.Labels) : null,
             Image = containerImage
         };
+    }
+
+    private async Task<bool> WaitForPodReadyAsync(string podName, CancellationToken cancellationToken)
+    {
+        var timeout = TimeSpan.FromSeconds(_config.PodReadyTimeoutSeconds);
+        var deadline = DateTime.UtcNow.Add(timeout);
+        var pollInterval = TimeSpan.FromSeconds(2);
+
+        while (DateTime.UtcNow < deadline)
+        {
+            try
+            {
+                var pod = await _client.CoreV1.ReadNamespacedPodAsync(
+                    podName,
+                    _config.TargetNamespace,
+                    cancellationToken: cancellationToken);
+
+                // Check if pod is ready
+                if (IsPodReady(pod))
+                {
+                    _logger.LogInformation("Pod {PodName} is ready", podName);
+                    return true;
+                }
+
+                // Check if pod has failed
+                if (pod.Status?.Phase == "Failed")
+                {
+                    _logger.LogWarning("Pod {PodName} failed during startup", podName);
+                    return false;
+                }
+
+                _logger.LogDebug("Pod {PodName} not ready yet, phase: {Phase}", podName, pod.Status?.Phase);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error checking pod {PodName} status", podName);
+            }
+
+            await Task.Delay(pollInterval, cancellationToken);
+        }
+
+        _logger.LogWarning("Timeout waiting for pod {PodName} to be ready after {TimeoutSeconds}s",
+            podName, _config.PodReadyTimeoutSeconds);
+        return false;
+    }
+
+    private bool IsPodReady(V1Pod pod)
+    {
+        if (pod.Status?.Phase != "Running")
+            return false;
+
+        var readyCondition = pod.Status.Conditions?
+            .FirstOrDefault(c => c.Type == "Ready");
+
+        return readyCondition?.Status == "True";
     }
 
     private bool IsValidImageName(string image)
