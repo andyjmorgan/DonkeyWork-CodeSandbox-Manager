@@ -173,7 +173,7 @@ public class KataContainerService : IKataContainerService
             ["app"] = "kata-manager",
             ["runtime"] = "kata",
             ["managed-by"] = "csharp-service",
-            ["created-at"] = DateTime.UtcNow.ToString("o")
+            ["created-at"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString()
         };
 
         if (request.Labels != null)

@@ -53,3 +53,5 @@ bld/
 # Environment
 .env
 .env.local
+appsettings.Development.json
+.DS_Store
