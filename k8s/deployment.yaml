@@ -18,7 +18,7 @@ spec:
       serviceAccountName: kata-manager
       containers:
         - name: api
-          image: kata-manager-api:latest
+          image: ghcr.io/andyjmorgan/DonkeyWork-CodeSandbox-Manager:0.1.0
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
