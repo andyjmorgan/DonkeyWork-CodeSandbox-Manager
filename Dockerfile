@@ -20,8 +20,8 @@ FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
 WORKDIR /app
 
 # Create non-root user
-RUN addgroup --system --gid 1000 appuser \
-    && adduser --system --uid 1000 --ingroup appuser appuser
+RUN groupadd --system --gid 1000 appuser \
+    && useradd --system --uid 1000 --gid 1000 --home-dir /app appuser
 
 # Copy published app
 COPY --from=publish /app/publish .
