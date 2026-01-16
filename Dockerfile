@@ -19,9 +19,9 @@ RUN dotnet publish "DonkeyWork.CodeSandbox-Manager.csproj" -c Release -o /app/pu
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
 WORKDIR /app
 
-# Create non-root user
-RUN groupadd --system --gid 1000 appuser \
-    && useradd --system --uid 1000 --gid 1000 --home-dir /app appuser
+# Create non-root user with non-conflicting IDs
+RUN groupadd --system --gid 10000 appuser \
+    && useradd --system --uid 10000 --gid 10000 --home-dir /app appuser
 
 # Copy published app
 COPY --from=publish /app/publish .
