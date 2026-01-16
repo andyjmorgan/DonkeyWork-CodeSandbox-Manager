@@ -226,48 +226,6 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           generate_release_notes: true
 
-  update-deployment:
-    name: Update Kubernetes Deployment
-    runs-on: ubuntu-latest
-    needs: [semantic-version, docker-build-push, create-release]
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Update deployment manifest
-        run: |
-          VERSION="${{ needs.semantic-version.outputs.version }}"
-          IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${VERSION}"
-
-          # Update the image in the deployment file
-          if [ -f "k8s/deployment.yaml" ]; then
-            sed -i "s|image:.*kata.*manager.*|image: ${IMAGE}|g" k8s/deployment.yaml
-            echo "Updated k8s/deployment.yaml with new image: ${IMAGE}"
-          fi
-
-      - name: Create Pull Request
-        uses: peter-evans/create-pull-request@v6
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          commit-message: "chore: update deployment to version ${{ needs.semantic-version.outputs.version }}"
-          title: "chore: update deployment to version ${{ needs.semantic-version.outputs.version }}"
-          body: |
-            ## Automated Deployment Update
-
-            This PR updates the Kubernetes deployment manifest to use the newly released version.
-
-            **Version:** ${{ needs.semantic-version.outputs.version }}
-            **Image:** ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.semantic-version.outputs.version }}
-            **Release:** ${{ needs.semantic-version.outputs.tag }}
-
-            This PR was automatically created by the release workflow.
-          branch: deployment/update-${{ needs.semantic-version.outputs.version }}
-          delete-branch: true
-          labels: |
-            automated
-            deployment
-
   post-release-summary:
     name: Post Release Summary
     runs-on: ubuntu-latest
