@@ -22,6 +22,9 @@ public class KataContainerManager
     [RegularExpression(@"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$", ErrorMessage = "Invalid pod name prefix")]
     public string PodNamePrefix { get; set; } = "kata-sandbox";
 
+    [Required]
+    public string DefaultImage { get; set; } = "ghcr.io/andyjmorgan/donkeywork-codesandbox-api:latest";
+
     public bool CleanupCompletedPods { get; set; } = true;
 
     [Range(30, 300, ErrorMessage = "Pod ready timeout must be between 30 and 300 seconds")]

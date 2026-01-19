@@ -27,18 +27,21 @@ public class KataContainerService : IKataContainerService
         CreateContainerRequest request,
         CancellationToken cancellationToken = default)
     {
+        // Use default image if none is provided
+        var imageName = string.IsNullOrWhiteSpace(request.Image)
+            ? _config.DefaultImage
+            : request.Image;
+
         _logger.LogInformation("Creating Kata container with image: {Image}, WaitForReady: {WaitForReady}",
-            request.Image, request.WaitForReady);
+            imageName, request.WaitForReady);
 
-        if (string.IsNullOrWhiteSpace(request.Image))
+        if (!IsValidImageName(imageName))
         {
-            throw new ArgumentException("Image name is required", nameof(request.Image));
+            throw new ArgumentException($"Invalid image name format: {imageName}", nameof(request.Image));
         }
 
-        if (!IsValidImageName(request.Image))
-        {
-            throw new ArgumentException($"Invalid image name format: {request.Image}", nameof(request.Image));
-        }
+        // Update request with resolved image name
+        request.Image = imageName;
 
         var uniqueId = Guid.NewGuid().ToString("N")[..8];
         var podName = $"{_config.PodNamePrefix}-{uniqueId}";
@@ -82,6 +85,192 @@ public class KataContainerService : IKataContainerService
         {
             _logger.LogError(ex, "Failed to create Kata container with image: {Image}", request.Image);
             throw;
+        }
+    }
+
+    public async IAsyncEnumerable<ContainerCreationEvent> CreateContainerWithEventsAsync(
+        CreateContainerRequest request,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        var channel = System.Threading.Channels.Channel.CreateUnbounded<ContainerCreationEvent>();
+
+        // Start the creation process in the background
+        var creationTask = CreateContainerInternalAsync(request, channel.Writer, cancellationToken);
+
+        // Stream events to caller as they arrive
+        await foreach (var evt in channel.Reader.ReadAllAsync(cancellationToken))
+        {
+            yield return evt;
+        }
+
+        // Ensure creation completes
+        await creationTask;
+    }
+
+    private async Task CreateContainerInternalAsync(
+        CreateContainerRequest request,
+        System.Threading.Channels.ChannelWriter<ContainerCreationEvent> writer,
+        CancellationToken cancellationToken)
+    {
+        // Use default image if none is provided
+        var imageName = string.IsNullOrWhiteSpace(request.Image)
+            ? _config.DefaultImage
+            : request.Image;
+
+        _logger.LogInformation("Creating Kata container with image: {Image} (streaming mode)", imageName);
+
+        if (!IsValidImageName(imageName))
+        {
+            var ex = new ArgumentException($"Invalid image name format: {imageName}", nameof(request.Image));
+            _logger.LogError(ex, "Invalid image name");
+            throw ex;
+        }
+
+        // Update request with resolved image name
+        request.Image = imageName;
+
+        var uniqueId = Guid.NewGuid().ToString("N")[..8];
+        var podName = $"{_config.PodNamePrefix}-{uniqueId}";
+        var startTime = DateTime.UtcNow;
+
+        var pod = BuildPodSpec(podName, request);
+
+        V1Pod? createdPod = null;
+        try
+        {
+            createdPod = await _client.CoreV1.CreateNamespacedPodAsync(
+                pod,
+                _config.TargetNamespace,
+                cancellationToken: cancellationToken);
+
+            _logger.LogInformation("Successfully created Kata container: {PodName}", podName);
+
+            // Emit created event
+            writer.TryWrite(new ContainerCreatedEvent
+            {
+                PodName = podName,
+                Phase = createdPod.Status?.Phase ?? "Pending"
+            });
+
+            // If WaitForReady is true, stream waiting events
+            if (request.WaitForReady)
+            {
+                var timeout = TimeSpan.FromSeconds(_config.PodReadyTimeoutSeconds);
+                var deadline = DateTime.UtcNow.Add(timeout);
+                var pollInterval = TimeSpan.FromSeconds(2);
+                var attemptNumber = 0;
+
+                while (DateTime.UtcNow < deadline)
+                {
+                    attemptNumber++;
+
+                    try
+                    {
+                        var currentPod = await _client.CoreV1.ReadNamespacedPodAsync(
+                            podName,
+                            _config.TargetNamespace,
+                            cancellationToken: cancellationToken);
+
+                        // Check if pod is ready
+                        if (IsPodReady(currentPod))
+                        {
+                            var elapsed = (DateTime.UtcNow - startTime).TotalSeconds;
+                            _logger.LogInformation("Pod {PodName} is ready after {AttemptNumber} attempts", podName, attemptNumber);
+
+                            writer.TryWrite(new ContainerReadyEvent
+                            {
+                                PodName = podName,
+                                ContainerInfo = MapPodToContainerInfo(currentPod),
+                                ElapsedSeconds = elapsed
+                            });
+
+                            return;
+                        }
+
+                        // Check if pod has failed
+                        if (currentPod.Status?.Phase == "Failed")
+                        {
+                            _logger.LogWarning("Pod {PodName} failed during startup", podName);
+
+                            writer.TryWrite(new ContainerFailedEvent
+                            {
+                                PodName = podName,
+                                Reason = "Pod entered Failed state",
+                                ContainerInfo = MapPodToContainerInfo(currentPod)
+                            });
+
+                            return;
+                        }
+
+                        // Emit waiting event
+                        writer.TryWrite(new ContainerWaitingEvent
+                        {
+                            PodName = podName,
+                            AttemptNumber = attemptNumber,
+                            Phase = currentPod.Status?.Phase ?? "Unknown",
+                            Message = $"Waiting for pod to be ready (attempt {attemptNumber})"
+                        });
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Error checking pod {PodName} status on attempt {AttemptNumber}", podName, attemptNumber);
+
+                        writer.TryWrite(new ContainerWaitingEvent
+                        {
+                            PodName = podName,
+                            AttemptNumber = attemptNumber,
+                            Phase = "Unknown",
+                            Message = $"Error checking status: {ex.Message}"
+                        });
+                    }
+
+                    await Task.Delay(pollInterval, cancellationToken);
+                }
+
+                // Timeout - fetch final state and emit failed event
+                _logger.LogWarning("Timeout waiting for pod {PodName} to be ready after {TimeoutSeconds}s",
+                    podName, _config.PodReadyTimeoutSeconds);
+
+                try
+                {
+                    var finalPod = await _client.CoreV1.ReadNamespacedPodAsync(
+                        podName,
+                        _config.TargetNamespace,
+                        cancellationToken: cancellationToken);
+
+                    writer.TryWrite(new ContainerFailedEvent
+                    {
+                        PodName = podName,
+                        Reason = $"Timeout after {_config.PodReadyTimeoutSeconds}s",
+                        ContainerInfo = MapPodToContainerInfo(finalPod)
+                    });
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to fetch final pod state after timeout");
+                    writer.TryWrite(new ContainerFailedEvent
+                    {
+                        PodName = podName,
+                        Reason = $"Timeout after {_config.PodReadyTimeoutSeconds}s (unable to fetch final state)",
+                        ContainerInfo = null
+                    });
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to create Kata container with image: {Image}", request.Image);
+
+            writer.TryWrite(new ContainerFailedEvent
+            {
+                PodName = podName,
+                Reason = $"Creation failed: {ex.Message}",
+                ContainerInfo = createdPod != null ? MapPodToContainerInfo(createdPod) : null
+            });
+        }
+        finally
+        {
+            writer.Complete();
         }
     }
 

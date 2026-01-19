@@ -118,7 +118,7 @@ public class KataContainerServiceTests
     }
 
     [Fact]
-    public async Task CreateContainerAsync_WithEmptyImageName_ThrowsArgumentException()
+    public async Task CreateContainerAsync_WithEmptyImageName_UsesDefaultImage()
     {
         // Arrange
         var request = new CreateContainerRequest
@@ -126,16 +126,31 @@ public class KataContainerServiceTests
             Image = ""
         };
 
-        // Act & Assert
-        var exception = await Assert.ThrowsAsync<ArgumentException>(
-            () => _service.CreateContainerAsync(request));
+        var defaultImage = "ubuntu:22.04";
+        var createdPod = CreateSamplePod($"kata-sandbox-12345678", defaultImage);
+        var response = new HttpOperationResponse<V1Pod>
+        {
+            Body = createdPod
+        };
 
-        Assert.Equal("Image name is required (Parameter 'Image')", exception.Message);
-        VerifyLogInformation(_mockLogger, "Creating Kata container with image:");
+        _mockCoreV1
+            .Setup(x => x.CreateNamespacedPodWithHttpMessagesAsync(
+                It.IsAny<V1Pod>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool?>(), It.IsAny<IReadOnlyDictionary<string, IReadOnlyList<string>>>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(response);
+
+        // Act
+        var result = await _service.CreateContainerAsync(request);
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Equal(defaultImage, result.Image);
     }
 
     [Fact]
-    public async Task CreateContainerAsync_WithWhitespaceImageName_ThrowsArgumentException()
+    public async Task CreateContainerAsync_WithWhitespaceImageName_UsesDefaultImage()
     {
         // Arrange
         var request = new CreateContainerRequest
@@ -143,11 +158,27 @@ public class KataContainerServiceTests
             Image = "   "
         };
 
-        // Act & Assert
-        var exception = await Assert.ThrowsAsync<ArgumentException>(
-            () => _service.CreateContainerAsync(request));
+        var defaultImage = "ubuntu:22.04";
+        var createdPod = CreateSamplePod($"kata-sandbox-12345678", defaultImage);
+        var response = new HttpOperationResponse<V1Pod>
+        {
+            Body = createdPod
+        };
 
-        Assert.Equal("Image name is required (Parameter 'Image')", exception.Message);
+        _mockCoreV1
+            .Setup(x => x.CreateNamespacedPodWithHttpMessagesAsync(
+                It.IsAny<V1Pod>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool?>(), It.IsAny<IReadOnlyDictionary<string, IReadOnlyList<string>>>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(response);
+
+        // Act
+        var result = await _service.CreateContainerAsync(request);
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Equal(defaultImage, result.Image);
     }
 
     [Fact]

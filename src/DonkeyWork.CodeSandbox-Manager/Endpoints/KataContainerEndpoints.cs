@@ -43,29 +43,83 @@ public static class KataContainerEndpoints
             .ProducesProblem(StatusCodes.Status500InternalServerError);
     }
 
-    private static async Task<Results<Created<KataContainerInfo>, BadRequest<object>, ProblemHttpResult>> CreateContainer(
+    private static async Task CreateContainer(
         CreateContainerRequest request,
         IKataContainerService containerService,
         ILogger<Program> logger,
+        HttpContext context,
         CancellationToken cancellationToken)
     {
+        logger.LogInformation(
+            "Create container endpoint called. Image: {Image}, WaitForReady: {WaitForReady}",
+            request.Image ?? "(default)",
+            request.WaitForReady
+        );
+
+        // Set headers for SSE
+        context.Response.Headers["Content-Type"] = "text/event-stream";
+        context.Response.Headers["Cache-Control"] = "no-cache";
+        context.Response.Headers["Connection"] = "keep-alive";
+
         try
         {
-            var container = await containerService.CreateContainerAsync(request, cancellationToken);
-            return TypedResults.Created($"/api/kata/{container.Name}", container);
+            // Stream events to client in SSE format
+            await foreach (var evt in containerService.CreateContainerWithEventsAsync(request, cancellationToken))
+            {
+                logger.LogInformation(
+                    "Streaming event. Type: {EventType}, PodName: {PodName}",
+                    evt.EventType,
+                    evt.PodName
+                );
+
+                // Write SSE format: "data: {...}\n\n"
+                var json = System.Text.Json.JsonSerializer.Serialize(evt, evt.GetType(), new System.Text.Json.JsonSerializerOptions
+                {
+                    PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase
+                });
+
+                var sseMessage = $"data: {json}\n\n";
+                await context.Response.Body.WriteAsync(System.Text.Encoding.UTF8.GetBytes(sseMessage), cancellationToken);
+                await context.Response.Body.FlushAsync(cancellationToken);
+            }
         }
         catch (ArgumentException ex)
         {
             logger.LogWarning(ex, "Invalid request to create container");
-            return TypedResults.BadRequest((object)new { error = ex.Message });
+
+            var errorEvent = new ContainerFailedEvent
+            {
+                PodName = "(none)",
+                Reason = $"Validation error: {ex.Message}"
+            };
+
+            var json = System.Text.Json.JsonSerializer.Serialize(errorEvent, new System.Text.Json.JsonSerializerOptions
+            {
+                PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase
+            });
+
+            var sseMessage = $"data: {json}\n\n";
+            await context.Response.Body.WriteAsync(System.Text.Encoding.UTF8.GetBytes(sseMessage), cancellationToken);
+            await context.Response.Body.FlushAsync(cancellationToken);
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "Failed to create container at API layer");
-            return TypedResults.Problem(
-                detail: ex.Message,
-                statusCode: StatusCodes.Status500InternalServerError,
-                title: "Failed to create container");
+
+            var errorEvent = new ContainerFailedEvent
+            {
+                PodName = "(none)",
+                Reason = $"Unexpected error: {ex.Message}"
+            };
+
+            var json = System.Text.Json.JsonSerializer.Serialize(errorEvent, new System.Text.Json.JsonSerializerOptions
+            {
+                PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase
+            });
+
+            var sseMessage = $"data: {json}\n\n";
+            await context.Response.Body.WriteAsync(System.Text.Encoding.UTF8.GetBytes(sseMessage), cancellationToken);
+            await context.Response.Body.FlushAsync(cancellationToken);
         }
     }
 
