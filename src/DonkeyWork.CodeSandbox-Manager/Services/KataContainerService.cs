@@ -636,11 +636,23 @@ public class KataContainerService : IKataContainerService
                 if (root.TryGetProperty("stream", out var streamProp))
                 {
                     // OutputEvent
+                    // Handle data field which could be string, number, or other types
+                    var dataElement = root.GetProperty("data");
+                    string dataValue = dataElement.ValueKind switch
+                    {
+                        JsonValueKind.String => dataElement.GetString() ?? string.Empty,
+                        JsonValueKind.Number => dataElement.GetRawText(),
+                        JsonValueKind.True => "true",
+                        JsonValueKind.False => "false",
+                        JsonValueKind.Null => string.Empty,
+                        _ => dataElement.GetRawText()
+                    };
+
                     var outputEvent = new OutputEvent
                     {
                         Pid = root.GetProperty("pid").GetInt32(),
                         Stream = streamProp.GetString() ?? string.Empty,
-                        Data = root.GetProperty("data").GetString() ?? string.Empty
+                        Data = dataValue
                     };
                     yield return outputEvent;
                 }
