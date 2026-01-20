@@ -1,7 +1,7 @@
 # Kata Container Manager API
 
-[![PR Build and Test](https://github.com/andrewmorgan/DonkeyWork-CodeSandbox-Manager/actions/workflows/pr-build-test.yml/badge.svg)](https://github.com/andrewmorgan/DonkeyWork-CodeSandbox-Manager/actions/workflows/pr-build-test.yml)
-[![Release](https://github.com/andrewmorgan/DonkeyWork-CodeSandbox-Manager/actions/workflows/release.yml/badge.svg)](https://github.com/andrewmorgan/DonkeyWork-CodeSandbox-Manager/actions/workflows/release.yml)
+[![PR Build and Test](https://github.com/andyjmorgan/DonkeyWork-CodeSandbox-Manager/actions/workflows/pr-build-test.yml/badge.svg)](https://github.com/andyjmorgan/DonkeyWork-CodeSandbox-Manager/actions/workflows/pr-build-test.yml)
+[![Release](https://github.com/andyjmorgan/DonkeyWork-CodeSandbox-Manager/actions/workflows/release.yml/badge.svg)](https://github.com/andyjmorgan/DonkeyWork-CodeSandbox-Manager/actions/workflows/release.yml)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![.NET](https://img.shields.io/badge/.NET-10.0-512BD4)](https://dotnet.microsoft.com/)
 
@@ -172,7 +172,7 @@ Health check endpoint.
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/andrewmorgan/DonkeyWork-CodeSandbox-Manager.git
+   git clone https://github.com/andyjmorgan/DonkeyWork-CodeSandbox-Manager.git
    cd DonkeyWork-CodeSandbox-Manager
    ```
 
@@ -238,10 +238,10 @@ The project uses GitHub Actions for CI/CD. Docker images are automatically built
 
 ```bash
 # Pull the latest image
-docker pull ghcr.io/andrewmorgan/donkeywork-codesandbox-manager:latest
+docker pull ghcr.io/andyjmorgan/donkeywork-codesandbox-manager:latest
 
 # Or pull a specific version
-docker pull ghcr.io/andrewmorgan/donkeywork-codesandbox-manager:v1.0.0
+docker pull ghcr.io/andyjmorgan/donkeywork-codesandbox-manager:v1.0.0
 ```
 
 Alternatively, you can build locally:
