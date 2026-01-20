@@ -89,8 +89,12 @@ app.MapOpenApi();
 app.MapScalarApiReference("/scalar/v1", (options, context) =>
 {
     // Dynamically add server URLs based on request scheme
+    // Check X-Forwarded-Proto header from ingress/reverse proxy
+    var forwardedProto = context.Request.Headers["X-Forwarded-Proto"].FirstOrDefault();
+    var isHttps = context.Request.Scheme == "https" || forwardedProto == "https";
+
     // If accessed via HTTPS (through ingress), add HTTPS server first
-    if (context.Request.Scheme == "https")
+    if (isHttps)
         options.AddServer(new ScalarServer($"https://{context.Request.Host}"));
     options.AddServer(new ScalarServer($"http://{context.Request.Host}"));
 });
