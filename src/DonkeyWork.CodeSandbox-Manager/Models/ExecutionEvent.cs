@@ -1,8 +1,13 @@
+using System.Text.Json.Serialization;
+
 namespace DonkeyWork.CodeSandbox_Manager.Models;
 
 /// <summary>
 /// Base class for execution events from CodeExecution API
 /// </summary>
+[JsonPolymorphic(TypeDiscriminatorPropertyName = "eventType")]
+[JsonDerivedType(typeof(OutputEvent), "output")]
+[JsonDerivedType(typeof(CompletedEvent), "completed")]
 public abstract class ExecutionEvent
 {
     public int Pid { get; set; }
