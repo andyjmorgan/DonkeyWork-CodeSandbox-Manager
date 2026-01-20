@@ -86,18 +86,12 @@ app.UseSerilogRequestLogging();
 
 // Enable OpenAPI and Scalar
 app.MapOpenApi();
-app.MapScalarApiReference("/scalar/v1", (options, context) =>
+app.MapScalarApiReference("/scalar", (options, context) =>
 {
-    // Dynamically add server URLs based on request scheme
-    // Check X-Forwarded-Proto header from ingress/reverse proxy
-    var forwardedProto = context.Request.Headers["X-Forwarded-Proto"].FirstOrDefault();
-    var isHttps = context.Request.Scheme == "https" || forwardedProto == "https";
-
-    // If accessed via HTTPS (through ingress), add HTTPS server first
-    if (isHttps)
-        options.AddServer(new ScalarServer($"https://{context.Request.Host}"));
+    options.AddServer(new ScalarServer($"https://{context.Request.Host}"));
     options.AddServer(new ScalarServer($"http://{context.Request.Host}"));
 });
+
 Log.Information("API documentation enabled at /scalar/v1");
 
 app.UseHttpsRedirection();
