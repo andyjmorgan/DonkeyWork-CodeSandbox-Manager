@@ -17,6 +17,7 @@ public class KataContainerServiceTests
     private readonly Mock<ICoreV1Operations> _mockCoreV1;
     private readonly Mock<ILogger<KataContainerService>> _mockLogger;
     private readonly Mock<IOptions<KataContainerManager>> _mockOptions;
+    private readonly Mock<IHttpClientFactory> _mockHttpClientFactory;
     private readonly KataContainerManager _config;
     private readonly KataContainerService _service;
 
@@ -26,6 +27,7 @@ public class KataContainerServiceTests
         _mockCoreV1 = new Mock<ICoreV1Operations>();
         _mockLogger = new Mock<ILogger<KataContainerService>>();
         _mockOptions = new Mock<IOptions<KataContainerManager>>();
+        _mockHttpClientFactory = new Mock<IHttpClientFactory>();
 
         _config = new KataContainerManager
         {
@@ -42,7 +44,8 @@ public class KataContainerServiceTests
         _service = new KataContainerService(
             _mockKubernetesClient.Object,
             _mockOptions.Object,
-            _mockLogger.Object);
+            _mockLogger.Object,
+            _mockHttpClientFactory.Object);
     }
 
     #region CreateContainerAsync Tests

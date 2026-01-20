@@ -2,10 +2,7 @@ version: '3.8'
 
 services:
   kata-container-manager:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: kata-container-manager:latest
+    image: ghcr.io/andyjmorgan/donkeywork-codesandbox-manager:latest
     container_name: kata-container-manager
     ports:
       - "8668:8668"

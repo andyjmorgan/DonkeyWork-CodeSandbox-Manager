@@ -62,6 +62,9 @@ builder.Services.AddSingleton<IKubernetes>(sp =>
     return new Kubernetes(defaultConfig);
 });
 
+// Register HTTP client for passthrough requests
+builder.Services.AddHttpClient();
+
 // Register application services
 builder.Services.AddScoped<IKataContainerService, KataContainerService>();
 

@@ -1,3 +1,7 @@
+using System.Collections.Concurrent;
+using System.Net.Http.Headers;
+using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using DonkeyWork.CodeSandbox_Manager.Configuration;
 using DonkeyWork.CodeSandbox_Manager.Models;
@@ -12,15 +16,19 @@ public class KataContainerService : IKataContainerService
     private readonly IKubernetes _client;
     private readonly KataContainerManager _config;
     private readonly ILogger<KataContainerService> _logger;
+    private readonly IHttpClientFactory _httpClientFactory;
+    private readonly ConcurrentDictionary<string, DateTime> _sandboxLastActivity = new();
 
     public KataContainerService(
         IKubernetes client,
         IOptions<KataContainerManager> config,
-        ILogger<KataContainerService> logger)
+        ILogger<KataContainerService> logger,
+        IHttpClientFactory httpClientFactory)
     {
         _client = client;
         _config = config.Value;
         _logger = logger;
+        _httpClientFactory = httpClientFactory;
     }
 
     public async Task<KataContainerInfo> CreateContainerAsync(
@@ -556,5 +564,135 @@ public class KataContainerService : IKataContainerService
     {
         var regex = new Regex(@"^[a-z0-9\-\.]+(/[a-z0-9\-\.]+)*(:[a-zA-Z0-9\-\.]+)?$");
         return regex.IsMatch(image);
+    }
+
+    // Execution passthrough implementation
+    public async IAsyncEnumerable<ExecutionEvent> ExecuteCommandAsync(
+        string sandboxId,
+        ExecutionRequest request,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("Executing command in sandbox {SandboxId}: {Command}", sandboxId, request.Command);
+
+        // Update last activity time
+        UpdateLastActivity(sandboxId);
+
+        // Get pod IP
+        var podIp = await GetPodIpAsync(sandboxId, cancellationToken);
+
+        // Create HTTP request to CodeExecution API
+        var httpClient = _httpClientFactory.CreateClient();
+        var apiUrl = $"http://{podIp}:8666/api/execute";
+
+        var jsonContent = JsonSerializer.Serialize(request);
+        var httpRequest = new HttpRequestMessage(HttpMethod.Post, apiUrl)
+        {
+            Content = new StringContent(jsonContent, Encoding.UTF8, "application/json")
+        };
+        httpRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
+
+        HttpResponseMessage response;
+        try
+        {
+            response = await httpClient.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            response.EnsureSuccessStatusCode();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to connect to sandbox {SandboxId} CodeExecution API", sandboxId);
+            throw;
+        }
+
+        var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var reader = new StreamReader(stream);
+
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            string? line;
+            try
+            {
+                line = await reader.ReadLineAsync(cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error reading from sandbox {SandboxId} stream", sandboxId);
+                yield break;
+            }
+
+            if (line == null)
+                break;
+
+            if (string.IsNullOrWhiteSpace(line))
+                continue;
+
+            // SSE format: "data: {json}"
+            if (line.StartsWith("data: "))
+            {
+                var jsonData = line.Substring(6);
+                var jsonDoc = JsonDocument.Parse(jsonData);
+                var root = jsonDoc.RootElement;
+
+                // Check if this is an OutputEvent or CompletedEvent
+                if (root.TryGetProperty("stream", out var streamProp))
+                {
+                    // OutputEvent
+                    var outputEvent = new OutputEvent
+                    {
+                        Pid = root.GetProperty("pid").GetInt32(),
+                        Stream = streamProp.GetString() ?? string.Empty,
+                        Data = root.GetProperty("data").GetString() ?? string.Empty
+                    };
+                    yield return outputEvent;
+                }
+                else if (root.TryGetProperty("exitCode", out var exitCodeProp))
+                {
+                    // CompletedEvent
+                    var completedEvent = new CompletedEvent
+                    {
+                        Pid = root.GetProperty("pid").GetInt32(),
+                        ExitCode = exitCodeProp.GetInt32(),
+                        TimedOut = root.GetProperty("timedOut").GetBoolean()
+                    };
+                    yield return completedEvent;
+
+                    _logger.LogInformation("Command completed in sandbox {SandboxId} with exit code {ExitCode}",
+                        sandboxId, completedEvent.ExitCode);
+                }
+            }
+        }
+    }
+
+    public async Task<string> GetPodIpAsync(string sandboxId, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var pod = await _client.CoreV1.ReadNamespacedPodAsync(
+                sandboxId,
+                _config.TargetNamespace,
+                cancellationToken: cancellationToken);
+
+            if (string.IsNullOrWhiteSpace(pod.Status?.PodIP))
+            {
+                throw new InvalidOperationException($"Pod {sandboxId} does not have an IP address yet");
+            }
+
+            return pod.Status.PodIP;
+        }
+        catch (k8s.Autorest.HttpOperationException ex) when (ex.Response.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            throw new InvalidOperationException($"Sandbox {sandboxId} not found", ex);
+        }
+    }
+
+    public void UpdateLastActivity(string sandboxId)
+    {
+        _sandboxLastActivity.AddOrUpdate(sandboxId, DateTime.UtcNow, (_, _) => DateTime.UtcNow);
+        _logger.LogDebug("Updated last activity for sandbox {SandboxId}", sandboxId);
+    }
+
+    public Task<DateTime?> GetLastActivityAsync(string sandboxId)
+    {
+        _sandboxLastActivity.TryGetValue(sandboxId, out var lastActivity);
+        return Task.FromResult<DateTime?>(lastActivity == default ? null : lastActivity);
     }
 }

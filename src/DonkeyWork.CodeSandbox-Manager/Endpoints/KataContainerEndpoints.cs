@@ -41,6 +41,14 @@ public static class KataContainerEndpoints
             .Produces<DeleteContainerResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
+
+        group.MapPost("/{sandboxId}/execute", ExecuteCommand)
+            .WithName("ExecuteCommand")
+            .WithSummary("Execute a command in a sandbox")
+            .WithDescription("Forwards a command execution request to the CodeExecution API running inside the specified sandbox. Returns Server-Sent Events (SSE) stream with output and completion events. Updates the sandbox's last activity timestamp.")
+            .Produces<ExecutionEvent>(StatusCodes.Status200OK, "text/event-stream")
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status500InternalServerError);
     }
 
     private static async Task CreateContainer(
@@ -194,6 +202,58 @@ public static class KataContainerEndpoints
                 detail: ex.Message,
                 statusCode: StatusCodes.Status500InternalServerError,
                 title: "Failed to delete container");
+        }
+    }
+
+    private static async Task ExecuteCommand(
+        string sandboxId,
+        ExecutionRequest request,
+        IKataContainerService containerService,
+        ILogger<Program> logger,
+        HttpContext context,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            // Set SSE headers
+            context.Response.ContentType = "text/event-stream";
+            context.Response.Headers.CacheControl = "no-cache";
+            context.Response.Headers.Connection = "keep-alive";
+
+            await foreach (var evt in containerService.ExecuteCommandAsync(sandboxId, request, cancellationToken))
+            {
+                // Serialize event to JSON
+                var json = System.Text.Json.JsonSerializer.Serialize(evt);
+
+                // Write SSE format
+                await context.Response.WriteAsync($"data: {json}\n\n", cancellationToken);
+                await context.Response.Body.FlushAsync(cancellationToken);
+            }
+        }
+        catch (InvalidOperationException ex)
+        {
+            logger.LogWarning(ex, "Invalid operation while executing command in sandbox {SandboxId}", sandboxId);
+
+            // Write error event
+            var errorJson = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                error = ex.Message,
+                sandboxId
+            });
+            await context.Response.WriteAsync($"data: {errorJson}\n\n", cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to execute command in sandbox {SandboxId}", sandboxId);
+
+            // Write error event
+            var errorJson = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                error = "Failed to execute command",
+                message = ex.Message,
+                sandboxId
+            });
+            await context.Response.WriteAsync($"data: {errorJson}\n\n", cancellationToken);
         }
     }
 }
