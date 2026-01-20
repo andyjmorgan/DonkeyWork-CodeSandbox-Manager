@@ -86,7 +86,14 @@ app.UseSerilogRequestLogging();
 
 // Enable OpenAPI and Scalar
 app.MapOpenApi();
-app.MapScalarApiReference();
+app.MapScalarApiReference("/scalar/v1", (options, context) =>
+{
+    // Dynamically add server URLs based on request scheme
+    // If accessed via HTTPS (through ingress), add HTTPS server first
+    if (context.Request.Scheme == "https")
+        options.AddServer(new ScalarServer($"https://{context.Request.Host}"));
+    options.AddServer(new ScalarServer($"http://{context.Request.Host}"));
+});
 Log.Information("API documentation enabled at /scalar/v1");
 
 app.UseHttpsRedirection();
