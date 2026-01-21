@@ -55,3 +55,6 @@ bld/
 .env.local
 appsettings.Development.json
 .DS_Store
+
+# Samples folder (external git repos)
+samples/
