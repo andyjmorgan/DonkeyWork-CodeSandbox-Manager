@@ -14,7 +14,7 @@ services:
       # Kubernetes Configuration
       - KataContainerManager__TargetNamespace=sandbox-containers
       - KataContainerManager__RuntimeClassName=kata-qemu
-      - KataContainerManager__DefaultImage=ghcr.io/andyjmorgan/donkeywork-codesandbox-manager-executor:latest
+      - KataContainerManager__DefaultImage=ghcr.io/andyjmorgan/donkeywork-codesandbox-executor:latest
       - KataContainerManager__DefaultResourceRequests__MemoryMi=128
       - KataContainerManager__DefaultResourceRequests__CpuMillicores=250
       - KataContainerManager__DefaultResourceLimits__MemoryMi=512

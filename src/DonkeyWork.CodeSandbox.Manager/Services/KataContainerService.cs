@@ -153,49 +153,8 @@ public class KataContainerService : IKataContainerService
                         // Check if pod is ready
                         if (IsPodReady(currentPod))
                         {
-                            _logger.LogInformation("Pod {PodName} is ready, checking Executor API health", podName);
-
-                            // Get pod IP and health check the Executor API
-                            var podIp = currentPod.Status?.PodIP;
-                            if (string.IsNullOrWhiteSpace(podIp))
-                            {
-                                writer.TryWrite(new ContainerWaitingEvent
-                                {
-                                    PodName = podName,
-                                    AttemptNumber = attemptNumber,
-                                    Phase = "Running",
-                                    Message = "Pod ready but no IP assigned yet"
-                                });
-                                await Task.Delay(pollInterval, cancellationToken);
-                                continue;
-                            }
-
-                            // Health check the Executor API
-                            var healthCheckResult = await CheckExecutorHealthAsync(podIp, cancellationToken);
-
-                            writer.TryWrite(new ContainerHealthCheckEvent
-                            {
-                                PodName = podName,
-                                IsHealthy = healthCheckResult.IsHealthy,
-                                Message = healthCheckResult.Message,
-                                PodIP = podIp
-                            });
-
-                            if (!healthCheckResult.IsHealthy)
-                            {
-                                writer.TryWrite(new ContainerWaitingEvent
-                                {
-                                    PodName = podName,
-                                    AttemptNumber = attemptNumber,
-                                    Phase = "Running",
-                                    Message = $"Executor API not ready: {healthCheckResult.Message}"
-                                });
-                                await Task.Delay(pollInterval, cancellationToken);
-                                continue;
-                            }
-
                             var elapsed = (DateTime.UtcNow - startTime).TotalSeconds;
-                            _logger.LogInformation("Pod {PodName} Executor API is healthy after {AttemptNumber} attempts", podName, attemptNumber);
+                            _logger.LogInformation("Pod {PodName} is ready after {AttemptNumber} attempts", podName, attemptNumber);
 
                             writer.TryWrite(new ContainerReadyEvent
                             {
@@ -571,46 +530,6 @@ public class KataContainerService : IKataContainerService
             .FirstOrDefault(c => c.Type == "Ready");
 
         return readyCondition?.Status == "True";
-    }
-
-    private async Task<(bool IsHealthy, string Message)> CheckExecutorHealthAsync(
-        string podIp,
-        CancellationToken cancellationToken)
-    {
-        var httpClient = _httpClientFactory.CreateClient();
-        httpClient.Timeout = TimeSpan.FromSeconds(5);
-
-        var healthUrl = $"http://{podIp}:8666/healthz";
-
-        try
-        {
-            var response = await httpClient.GetAsync(healthUrl, cancellationToken);
-
-            if (response.IsSuccessStatusCode)
-            {
-                _logger.LogDebug("Executor API health check passed at {Url}", healthUrl);
-                return (true, "Executor API is healthy");
-            }
-
-            var statusCode = (int)response.StatusCode;
-            _logger.LogDebug("Executor API health check failed with status {StatusCode} at {Url}", statusCode, healthUrl);
-            return (false, $"Health check returned status {statusCode}");
-        }
-        catch (TaskCanceledException)
-        {
-            _logger.LogDebug("Executor API health check timed out at {Url}", healthUrl);
-            return (false, "Health check timed out");
-        }
-        catch (HttpRequestException ex)
-        {
-            _logger.LogDebug(ex, "Executor API health check connection failed at {Url}", healthUrl);
-            return (false, $"Connection failed: {ex.Message}");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Unexpected error during health check at {Url}", healthUrl);
-            return (false, $"Unexpected error: {ex.Message}");
-        }
     }
 
     // Execution passthrough implementation

@@ -437,7 +437,6 @@ public class KataContainerEndpointsTests
                 {
                     "created" => JsonSerializer.Deserialize<ContainerCreatedEvent>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }),
                     "waiting" => JsonSerializer.Deserialize<ContainerWaitingEvent>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }),
-                    "healthcheck" => JsonSerializer.Deserialize<ContainerHealthCheckEvent>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }),
                     "ready" => JsonSerializer.Deserialize<ContainerReadyEvent>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }),
                     "failed" => JsonSerializer.Deserialize<ContainerFailedEvent>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }),
                     _ => null
