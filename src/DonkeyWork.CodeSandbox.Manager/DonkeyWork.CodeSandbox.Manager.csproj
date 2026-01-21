@@ -4,14 +4,13 @@
         <TargetFramework>net10.0</TargetFramework>
         <Nullable>enable</Nullable>
         <ImplicitUsings>enable</ImplicitUsings>
-        <RootNamespace>DonkeyWork.CodeSandbox_Manager</RootNamespace>
     </PropertyGroup>
 
     <ItemGroup>
-        <PackageReference Include="KubernetesClient" Version="18.0.13" />
-        <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.0" />
-        <PackageReference Include="Scalar.AspNetCore" Version="2.12.4" />
-        <PackageReference Include="Serilog.AspNetCore" Version="10.0.0" />
+        <PackageReference Include="KubernetesClient" />
+        <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
+        <PackageReference Include="Scalar.AspNetCore" />
+        <PackageReference Include="Serilog.AspNetCore" />
     </ItemGroup>
 
 </Project>
