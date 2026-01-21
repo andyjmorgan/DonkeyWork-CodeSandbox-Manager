@@ -42,6 +42,13 @@ public static class KataContainerEndpoints
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
 
+        group.MapDelete("/", DeleteAllContainers)
+            .WithName("DeleteAllContainers")
+            .WithSummary("Delete all Kata containers")
+            .WithDescription("Deletes all Kata containers in the sandbox-containers namespace")
+            .Produces<DeleteAllContainersResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status500InternalServerError);
+
         group.MapPost("/{sandboxId}/execute", ExecuteCommand)
             .WithName("ExecuteCommand")
             .WithSummary("Execute a command in a sandbox")
@@ -201,6 +208,26 @@ public static class KataContainerEndpoints
                 detail: ex.Message,
                 statusCode: StatusCodes.Status500InternalServerError,
                 title: "Failed to delete container");
+        }
+    }
+
+    private static async Task<Results<Ok<DeleteAllContainersResponse>, ProblemHttpResult>> DeleteAllContainers(
+        IKataContainerService containerService,
+        ILogger<Program> logger,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var response = await containerService.DeleteAllContainersAsync(cancellationToken);
+            return TypedResults.Ok(response);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to delete all containers at API layer");
+            return TypedResults.Problem(
+                detail: ex.Message,
+                statusCode: StatusCodes.Status500InternalServerError,
+                title: "Failed to delete all containers");
         }
     }
 

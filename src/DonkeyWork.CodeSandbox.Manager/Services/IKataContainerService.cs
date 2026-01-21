@@ -9,6 +9,7 @@ public interface IKataContainerService
     Task<List<KataContainerInfo>> ListContainersAsync(CancellationToken cancellationToken = default);
     Task<KataContainerInfo?> GetContainerAsync(string podName, CancellationToken cancellationToken = default);
     Task<DeleteContainerResponse> DeleteContainerAsync(string podName, CancellationToken cancellationToken = default);
+    Task<DeleteAllContainersResponse> DeleteAllContainersAsync(CancellationToken cancellationToken = default);
 
     // Execution passthrough methods
     Task ExecuteCommandAsync(string sandboxId, ExecutionRequest request, Stream responseStream, CancellationToken cancellationToken = default);

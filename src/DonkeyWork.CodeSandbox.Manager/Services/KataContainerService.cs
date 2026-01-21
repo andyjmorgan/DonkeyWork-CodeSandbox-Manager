@@ -357,6 +357,51 @@ public class KataContainerService : IKataContainerService
         }
     }
 
+    public async Task<DeleteAllContainersResponse> DeleteAllContainersAsync(
+        CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("Deleting all Kata containers in namespace: {Namespace}", _config.TargetNamespace);
+
+        var response = new DeleteAllContainersResponse();
+
+        try
+        {
+            var containers = await ListContainersAsync(cancellationToken);
+
+            foreach (var container in containers)
+            {
+                try
+                {
+                    await _client.CoreV1.DeleteNamespacedPodAsync(
+                        container.Name,
+                        _config.TargetNamespace,
+                        body: new V1DeleteOptions { GracePeriodSeconds = 0 },
+                        cancellationToken: cancellationToken);
+
+                    response.DeletedPods.Add(container.Name);
+                    response.DeletedCount++;
+                    _logger.LogInformation("Deleted Kata container: {PodName}", container.Name);
+                }
+                catch (Exception ex)
+                {
+                    response.FailedPods.Add(container.Name);
+                    response.FailedCount++;
+                    _logger.LogWarning(ex, "Failed to delete Kata container: {PodName}", container.Name);
+                }
+            }
+
+            _logger.LogInformation("Deleted {DeletedCount} containers, {FailedCount} failed",
+                response.DeletedCount, response.FailedCount);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to delete all Kata containers");
+            throw;
+        }
+
+        return response;
+    }
+
     private V1Pod BuildPodSpec(string podName, CreateContainerRequest request)
     {
         var labels = new Dictionary<string, string>
