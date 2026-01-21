@@ -2,8 +2,12 @@
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
-# Copy csproj and restore dependencies
+# Copy Directory.Packages.props for central package management
+COPY ["Directory.Packages.props", "./"]
+
+# Copy csproj files and restore dependencies
 COPY ["src/DonkeyWork.CodeSandbox.Manager/DonkeyWork.CodeSandbox.Manager.csproj", "src/DonkeyWork.CodeSandbox.Manager/"]
+COPY ["src/DonkeyWork.CodeSandbox.Contracts/DonkeyWork.CodeSandbox.Contracts.csproj", "src/DonkeyWork.CodeSandbox.Contracts/"]
 RUN dotnet restore "src/DonkeyWork.CodeSandbox.Manager/DonkeyWork.CodeSandbox.Manager.csproj"
 
 # Copy everything else and build

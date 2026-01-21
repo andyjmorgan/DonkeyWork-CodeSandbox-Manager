@@ -1,6 +1,9 @@
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
+# Copy Directory.Packages.props for central package management
+COPY ["Directory.Packages.props", "./"]
+
 # Copy project files
 COPY ["src/DonkeyWork.CodeSandbox.Contracts/DonkeyWork.CodeSandbox.Contracts.csproj", "DonkeyWork.CodeSandbox.Contracts/"]
 COPY ["src/DonkeyWork.CodeSandbox.Server/DonkeyWork.CodeSandbox.Server.csproj", "DonkeyWork.CodeSandbox.Server/"]

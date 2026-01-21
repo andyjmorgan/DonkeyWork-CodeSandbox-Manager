@@ -386,18 +386,10 @@ DonkeyWork-CodeSandbox-Manager/
 
 ## References
 
-- [MVP Documentation](MVP.md) - Detailed implementation guide
 - [Kata Containers](https://katacontainers.io/) - Official Kata documentation
 - [Kubernetes C# Client](https://github.com/kubernetes-client/csharp) - Client library
 - [k3s Documentation](https://docs.k3s.io/) - k3s cluster documentation
 
 ## License
 
-[Your License Here]
-
-## Support
-
-For cluster-specific issues, refer to:
-- Kata documentation: `/mnt/lab/k3s/system/kata-containers/README.md`
-- Check pod events and logs
-- Verify RBAC permissions
+MIT
