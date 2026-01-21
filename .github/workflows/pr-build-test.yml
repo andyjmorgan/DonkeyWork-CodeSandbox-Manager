@@ -6,10 +6,12 @@ on:
       - main
     paths:
       - 'src/**'
+      - 'test/**'
       - 'Dockerfile'
       - '.github/workflows/pr-build-test.yml'
       - 'docker-compose.yml'
       - '*.sln'
+      - 'Directory.Packages.props'
 
 env:
   DOTNET_VERSION: '10.0.x'
@@ -39,7 +41,7 @@ jobs:
       - name: Build solution
         run: dotnet build DonkeyWork.CodeSandbox.sln --configuration Release --no-restore
 
-      - name: Run unit tests
+      - name: Run all tests
         run: |
           dotnet test DonkeyWork.CodeSandbox.sln \
             --configuration Release \
@@ -48,7 +50,6 @@ jobs:
             --logger "trx;LogFileName=test-results.trx" \
             --collect:"XPlat Code Coverage" \
             --results-directory ./TestResults
-        continue-on-error: false
 
       - name: Publish test results
         uses: dorny/test-reporter@v1
@@ -67,10 +68,19 @@ jobs:
           path: ./TestResults
           retention-days: 30
 
-  docker-build-manager:
-    name: Docker Build Manager
+  docker-build:
+    name: Docker Build (Validation)
     runs-on: ubuntu-latest
     needs: build-and-test
+    strategy:
+      matrix:
+        include:
+          - name: manager
+            dockerfile: ./Dockerfile
+            context: .
+          - name: executor
+            dockerfile: ./src/DonkeyWork.CodeSandbox.Server/Dockerfile
+            context: .
 
     steps:
       - name: Checkout code
@@ -78,60 +88,17 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-        with:
-          platforms: linux/amd64,linux/arm64
 
-      - name: Build Manager Docker image
+      - name: Build ${{ matrix.name }} Docker image
         uses: docker/build-push-action@v5
         with:
-          context: .
-          file: ./Dockerfile
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
           push: false
-          tags: donkeywork-codesandbox-manager:pr-${{ github.event.pull_request.number }}
-          cache-from: type=gha,scope=manager
-          cache-to: type=gha,mode=max,scope=manager
+          tags: donkeywork-codesandbox-${{ matrix.name }}:pr-${{ github.event.pull_request.number }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
           platforms: linux/amd64
-          outputs: type=docker,dest=/tmp/manager-image.tar
-
-      - name: Upload Manager Docker image artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: docker-image-manager
-          path: /tmp/manager-image.tar
-          retention-days: 7
-
-  docker-build-executor:
-    name: Docker Build Executor
-    runs-on: ubuntu-latest
-    needs: build-and-test
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-        with:
-          platforms: linux/amd64,linux/arm64
-
-      - name: Build Executor Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./src/DonkeyWork.CodeSandbox.Server/Dockerfile
-          push: false
-          tags: donkeywork-codesandbox-executor:pr-${{ github.event.pull_request.number }}
-          cache-from: type=gha,scope=executor
-          cache-to: type=gha,mode=max,scope=executor
-          platforms: linux/amd64
-          outputs: type=docker,dest=/tmp/executor-image.tar
-
-      - name: Upload Executor Docker image artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: docker-image-executor
-          path: /tmp/executor-image.tar
-          retention-days: 7
 
   lint-and-security:
     name: Lint and Security Scan
@@ -155,21 +122,19 @@ jobs:
 
       - name: Security scan - Dependency check
         run: dotnet list package --vulnerable --include-transitive
-        continue-on-error: false
 
-  pr-status-check:
-    name: PR Status Check
+  pr-status:
+    name: PR Status
     runs-on: ubuntu-latest
-    needs: [build-and-test, docker-build-manager, docker-build-executor, lint-and-security]
+    needs: [build-and-test, docker-build, lint-and-security]
     if: always()
 
     steps:
-      - name: Check build status
+      - name: Check status
         run: |
           if [ "${{ needs.build-and-test.result }}" != "success" ] || \
-             [ "${{ needs.docker-build-manager.result }}" != "success" ] || \
-             [ "${{ needs.docker-build-executor.result }}" != "success" ]; then
+             [ "${{ needs.docker-build.result }}" != "success" ]; then
             echo "Build or tests failed!"
             exit 1
           fi
-          echo "All checks passed successfully!"
+          echo "All checks passed!"
