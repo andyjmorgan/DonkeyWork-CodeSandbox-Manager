@@ -380,7 +380,8 @@ public class KataContainerService : IKataContainerService
             Name = "workload",
             Image = _config.DefaultImage,
             ImagePullPolicy = "Always",
-            Resources = BuildResourceRequirements(request.Resources)
+            Resources = BuildResourceRequirements(request.Resources),
+            Stdin = true  // Keep stdin open to prevent ConsoleLifetime from triggering shutdown
         };
 
         if (request.EnvironmentVariables != null && request.EnvironmentVariables.Count > 0)
