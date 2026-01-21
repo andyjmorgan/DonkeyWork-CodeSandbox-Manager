@@ -408,6 +408,7 @@ public class KataContainerService : IKataContainerService
         {
             Name = "workload",
             Image = request.Image,
+            ImagePullPolicy = "Always",
             Resources = BuildResourceRequirements(request.Resources)
         };
 
