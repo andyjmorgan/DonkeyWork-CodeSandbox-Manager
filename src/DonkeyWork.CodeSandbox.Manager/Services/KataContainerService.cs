@@ -381,7 +381,8 @@ public class KataContainerService : IKataContainerService
             Image = _config.DefaultImage,
             ImagePullPolicy = "Always",
             Resources = BuildResourceRequirements(request.Resources),
-            Stdin = true  // Keep stdin open to prevent ConsoleLifetime from triggering shutdown
+            Stdin = true,  // Keep stdin open to prevent ConsoleLifetime from triggering shutdown
+            Tty = true
         };
 
         if (request.EnvironmentVariables != null && request.EnvironmentVariables.Count > 0)
