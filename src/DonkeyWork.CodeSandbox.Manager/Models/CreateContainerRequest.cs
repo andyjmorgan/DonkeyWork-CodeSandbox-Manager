@@ -4,8 +4,6 @@ public class CreateContainerRequest
 {
     public Dictionary<string, string>? Labels { get; set; }
     public Dictionary<string, string>? EnvironmentVariables { get; set; }
-    public List<string>? Command { get; set; }
-    public List<string>? Args { get; set; }
     public ResourceRequirements? Resources { get; set; }
 
     /// <summary>

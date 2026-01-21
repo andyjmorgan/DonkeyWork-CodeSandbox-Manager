@@ -224,8 +224,6 @@ Create a new Kata container. The container image is fixed to the configured defa
   "environmentVariables": {
     "KEY": "value"
   },
-  "command": ["/bin/sh"],
-  "args": ["-c", "echo Hello && sleep 3600"],
   "resources": {
     "requests": {
       "memoryMi": 256,
@@ -245,8 +243,6 @@ Create a new Kata container. The container image is fixed to the configured defa
 data: {"eventType":"created","podName":"kata-sandbox-a1b2c3d4","phase":"Pending"}
 
 data: {"eventType":"waiting","podName":"kata-sandbox-a1b2c3d4","attemptNumber":1,"phase":"Pending","message":"Waiting for pod to be ready"}
-
-data: {"eventType":"healthcheck","podName":"kata-sandbox-a1b2c3d4","isHealthy":true,"message":"Executor API is healthy","podIP":"10.42.1.15"}
 
 data: {"eventType":"ready","podName":"kata-sandbox-a1b2c3d4","containerInfo":{...},"elapsedSeconds":15.2}
 ```

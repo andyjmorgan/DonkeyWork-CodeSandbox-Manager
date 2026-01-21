@@ -390,16 +390,6 @@ public class KataContainerService : IKataContainerService
                 .ToList();
         }
 
-        if (request.Command != null && request.Command.Count > 0)
-        {
-            container.Command = request.Command;
-        }
-
-        if (request.Args != null && request.Args.Count > 0)
-        {
-            container.Args = request.Args;
-        }
-
         var pod = new V1Pod
         {
             Metadata = new V1ObjectMeta
