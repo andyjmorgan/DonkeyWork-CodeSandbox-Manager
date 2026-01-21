@@ -2,7 +2,6 @@ using System.Collections.Concurrent;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using DonkeyWork.CodeSandbox.Manager.Configuration;
 using DonkeyWork.CodeSandbox.Manager.Models;
 using k8s;
@@ -35,21 +34,8 @@ public class KataContainerService : IKataContainerService
         CreateContainerRequest request,
         CancellationToken cancellationToken = default)
     {
-        // Use default image if none is provided
-        var imageName = string.IsNullOrWhiteSpace(request.Image)
-            ? _config.DefaultImage
-            : request.Image;
-
         _logger.LogInformation("Creating Kata container with image: {Image}, WaitForReady: {WaitForReady}",
-            imageName, request.WaitForReady);
-
-        if (!IsValidImageName(imageName))
-        {
-            throw new ArgumentException($"Invalid image name format: {imageName}", nameof(request.Image));
-        }
-
-        // Update request with resolved image name
-        request.Image = imageName;
+            _config.DefaultImage, request.WaitForReady);
 
         var uniqueId = Guid.NewGuid().ToString("N")[..8];
         var podName = $"{_config.PodNamePrefix}-{uniqueId}";
@@ -91,7 +77,7 @@ public class KataContainerService : IKataContainerService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to create Kata container with image: {Image}", request.Image);
+            _logger.LogError(ex, "Failed to create Kata container with image: {Image}", _config.DefaultImage);
             throw;
         }
     }
@@ -120,22 +106,7 @@ public class KataContainerService : IKataContainerService
         System.Threading.Channels.ChannelWriter<ContainerCreationEvent> writer,
         CancellationToken cancellationToken)
     {
-        // Use default image if none is provided
-        var imageName = string.IsNullOrWhiteSpace(request.Image)
-            ? _config.DefaultImage
-            : request.Image;
-
-        _logger.LogInformation("Creating Kata container with image: {Image} (streaming mode)", imageName);
-
-        if (!IsValidImageName(imageName))
-        {
-            var ex = new ArgumentException($"Invalid image name format: {imageName}", nameof(request.Image));
-            _logger.LogError(ex, "Invalid image name");
-            throw ex;
-        }
-
-        // Update request with resolved image name
-        request.Image = imageName;
+        _logger.LogInformation("Creating Kata container with image: {Image} (streaming mode)", _config.DefaultImage);
 
         var uniqueId = Guid.NewGuid().ToString("N")[..8];
         var podName = $"{_config.PodNamePrefix}-{uniqueId}";
@@ -182,8 +153,49 @@ public class KataContainerService : IKataContainerService
                         // Check if pod is ready
                         if (IsPodReady(currentPod))
                         {
+                            _logger.LogInformation("Pod {PodName} is ready, checking Executor API health", podName);
+
+                            // Get pod IP and health check the Executor API
+                            var podIp = currentPod.Status?.PodIP;
+                            if (string.IsNullOrWhiteSpace(podIp))
+                            {
+                                writer.TryWrite(new ContainerWaitingEvent
+                                {
+                                    PodName = podName,
+                                    AttemptNumber = attemptNumber,
+                                    Phase = "Running",
+                                    Message = "Pod ready but no IP assigned yet"
+                                });
+                                await Task.Delay(pollInterval, cancellationToken);
+                                continue;
+                            }
+
+                            // Health check the Executor API
+                            var healthCheckResult = await CheckExecutorHealthAsync(podIp, cancellationToken);
+
+                            writer.TryWrite(new ContainerHealthCheckEvent
+                            {
+                                PodName = podName,
+                                IsHealthy = healthCheckResult.IsHealthy,
+                                Message = healthCheckResult.Message,
+                                PodIP = podIp
+                            });
+
+                            if (!healthCheckResult.IsHealthy)
+                            {
+                                writer.TryWrite(new ContainerWaitingEvent
+                                {
+                                    PodName = podName,
+                                    AttemptNumber = attemptNumber,
+                                    Phase = "Running",
+                                    Message = $"Executor API not ready: {healthCheckResult.Message}"
+                                });
+                                await Task.Delay(pollInterval, cancellationToken);
+                                continue;
+                            }
+
                             var elapsed = (DateTime.UtcNow - startTime).TotalSeconds;
-                            _logger.LogInformation("Pod {PodName} is ready after {AttemptNumber} attempts", podName, attemptNumber);
+                            _logger.LogInformation("Pod {PodName} Executor API is healthy after {AttemptNumber} attempts", podName, attemptNumber);
 
                             writer.TryWrite(new ContainerReadyEvent
                             {
@@ -267,7 +279,7 @@ public class KataContainerService : IKataContainerService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to create Kata container with image: {Image}", request.Image);
+            _logger.LogError(ex, "Failed to create Kata container with image: {Image}", _config.DefaultImage);
 
             writer.TryWrite(new ContainerFailedEvent
             {
@@ -407,7 +419,7 @@ public class KataContainerService : IKataContainerService
         var container = new V1Container
         {
             Name = "workload",
-            Image = request.Image,
+            Image = _config.DefaultImage,
             ImagePullPolicy = "Always",
             Resources = BuildResourceRequirements(request.Resources)
         };
@@ -561,10 +573,44 @@ public class KataContainerService : IKataContainerService
         return readyCondition?.Status == "True";
     }
 
-    private bool IsValidImageName(string image)
+    private async Task<(bool IsHealthy, string Message)> CheckExecutorHealthAsync(
+        string podIp,
+        CancellationToken cancellationToken)
     {
-        var regex = new Regex(@"^[a-z0-9\-\.]+(/[a-z0-9\-\.]+)*(:[a-zA-Z0-9\-\.]+)?$");
-        return regex.IsMatch(image);
+        var httpClient = _httpClientFactory.CreateClient();
+        httpClient.Timeout = TimeSpan.FromSeconds(5);
+
+        var healthUrl = $"http://{podIp}:8666/healthz";
+
+        try
+        {
+            var response = await httpClient.GetAsync(healthUrl, cancellationToken);
+
+            if (response.IsSuccessStatusCode)
+            {
+                _logger.LogDebug("Executor API health check passed at {Url}", healthUrl);
+                return (true, "Executor API is healthy");
+            }
+
+            var statusCode = (int)response.StatusCode;
+            _logger.LogDebug("Executor API health check failed with status {StatusCode} at {Url}", statusCode, healthUrl);
+            return (false, $"Health check returned status {statusCode}");
+        }
+        catch (TaskCanceledException)
+        {
+            _logger.LogDebug("Executor API health check timed out at {Url}", healthUrl);
+            return (false, "Health check timed out");
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogDebug(ex, "Executor API health check connection failed at {Url}", healthUrl);
+            return (false, $"Connection failed: {ex.Message}");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Unexpected error during health check at {Url}", healthUrl);
+            return (false, $"Unexpected error: {ex.Message}");
+        }
     }
 
     // Execution passthrough implementation

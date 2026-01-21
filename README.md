@@ -31,6 +31,141 @@ A unified monorepo containing both the **Manager API** (Kata container orchestra
 - **Configuration**: IOptions with data validation
 - **Container Runtime**: Kata Containers (kata-qemu)
 
+### System Overview
+
+```mermaid
+flowchart TB
+    subgraph Client["Client Application"]
+        CA[API Consumer]
+    end
+
+    subgraph Manager["Manager API :8668"]
+        ME["/api/kata endpoints"]
+        KCS[KataContainerService]
+    end
+
+    subgraph K8s["Kubernetes Cluster"]
+        API[Kubernetes API Server]
+        subgraph NS["sandbox-containers namespace"]
+            subgraph KP1["Kata Pod 1"]
+                VM1["Kata VM"]
+                EX1["Executor API :8666"]
+            end
+            subgraph KP2["Kata Pod 2"]
+                VM2["Kata VM"]
+                EX2["Executor API :8666"]
+            end
+        end
+    end
+
+    CA -->|"REST/SSE"| ME
+    ME --> KCS
+    KCS -->|"Create/List/Delete Pods"| API
+    API --> KP1
+    API --> KP2
+    KCS -->|"Execute Commands"| EX1
+    KCS -->|"Execute Commands"| EX2
+```
+
+### Container Creation Flow
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Manager as Manager API
+    participant K8s as Kubernetes API
+    participant Kata as Kata Pod
+    participant Executor as Executor API
+
+    Client->>Manager: POST /api/kata
+    Manager->>Manager: Generate unique pod name
+    Manager->>K8s: Create Pod (kata-qemu runtime)
+    K8s-->>Manager: Pod created (Pending)
+    Manager-->>Client: SSE: created event
+
+    loop Wait for Pod Ready
+        Manager->>K8s: Get Pod status
+        K8s-->>Manager: Pod status
+        Manager-->>Client: SSE: waiting event
+    end
+
+    K8s->>Kata: Start Kata VM
+    Kata->>Kata: Boot VM + Start Executor API
+
+    loop Health Check Executor API
+        Manager->>Executor: GET /healthz
+        alt Healthy
+            Executor-->>Manager: 200 OK
+            Manager-->>Client: SSE: healthcheck (healthy)
+        else Not Ready
+            Executor-->>Manager: Connection refused / timeout
+            Manager-->>Client: SSE: healthcheck (unhealthy)
+            Manager-->>Client: SSE: waiting event
+        end
+    end
+
+    Manager-->>Client: SSE: ready event
+```
+
+### Command Execution Flow
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Manager as Manager API
+    participant Executor as Executor API (in Kata Pod)
+    participant Process as Bash Process
+
+    Client->>Manager: POST /api/kata/{sandboxId}/execute
+    Manager->>Manager: Lookup Pod IP
+    Manager->>Executor: POST /api/execute (SSE)
+
+    Executor->>Process: Spawn /bin/bash -c "command"
+
+    loop Stream Output
+        Process-->>Executor: stdout/stderr
+        Executor-->>Manager: SSE: OutputEvent
+        Manager-->>Client: SSE: OutputEvent
+    end
+
+    Process-->>Executor: Exit code
+    Executor-->>Manager: SSE: CompletedEvent
+    Manager-->>Client: SSE: CompletedEvent
+```
+
+### Component Interaction
+
+```mermaid
+flowchart LR
+    subgraph Manager["Manager API"]
+        direction TB
+        EP[Endpoints]
+        SVC[KataContainerService]
+        CFG[Configuration]
+    end
+
+    subgraph Executor["Executor API"]
+        direction TB
+        CTRL[ExecutionController]
+        MP[ManagedProcess]
+    end
+
+    subgraph Shared["Contracts"]
+        EE[ExecutionEvent]
+        OE[OutputEvent]
+        CE[CompletedEvent]
+    end
+
+    EP --> SVC
+    SVC --> CFG
+    SVC -.->|HTTP/SSE| CTRL
+    CTRL --> MP
+    MP --> OE
+    MP --> CE
+    OE --> EE
+    CE --> EE
+```
+
 ## Prerequisites
 
 1. **Kubernetes Cluster**: k3s v1.33.5+ with Kata Containers enabled
@@ -77,12 +212,11 @@ The service is configured via `appsettings.json`:
 All endpoints are prefixed with `/api/kata` to support future multi-runtime capabilities (Kata, gVisor, etc.).
 
 ### POST /api/kata
-Create a new Kata container.
+Create a new Kata container. The container image is fixed to the configured default executor image for security.
 
 **Request Body:**
 ```json
 {
-  "image": "nginx:alpine",
   "labels": {
     "environment": "sandbox",
     "project": "test"
@@ -101,26 +235,20 @@ Create a new Kata container.
       "memoryMi": 1024,
       "cpuMillicores": 2000
     }
-  }
+  },
+  "waitForReady": true
 }
 ```
 
-**Response:** `201 Created`
-```json
-{
-  "name": "kata-sandbox-a1b2c3d4",
-  "phase": "Pending",
-  "isReady": false,
-  "createdAt": "2026-01-13T10:30:00Z",
-  "nodeName": null,
-  "podIP": null,
-  "labels": {
-    "app": "kata-manager",
-    "runtime": "kata",
-    "environment": "sandbox"
-  },
-  "image": "nginx:alpine"
-}
+**Response:** Server-Sent Events (SSE) stream with creation progress:
+```
+data: {"eventType":"created","podName":"kata-sandbox-a1b2c3d4","phase":"Pending"}
+
+data: {"eventType":"waiting","podName":"kata-sandbox-a1b2c3d4","attemptNumber":1,"phase":"Pending","message":"Waiting for pod to be ready"}
+
+data: {"eventType":"healthcheck","podName":"kata-sandbox-a1b2c3d4","isHealthy":true,"message":"Executor API is healthy","podIP":"10.42.1.15"}
+
+data: {"eventType":"ready","podName":"kata-sandbox-a1b2c3d4","containerInfo":{...},"elapsedSeconds":15.2}
 ```
 
 ### GET /api/kata
@@ -340,38 +468,42 @@ Both workflows use aggressive caching strategies:
 ### Project Structure
 
 ```
-DonkeyWork.CodeSandbox-Manager/
+DonkeyWork-CodeSandbox-Manager/
 ├── src/
-│   └── DonkeyWork.CodeSandbox-Manager/
-│       ├── Configuration/
-│       │   └── KataContainerManager.cs  # Configuration models with validation
-│       ├── Endpoints/
-│       │   └── KataContainerEndpoints.cs # Minimal API endpoints (/api/kata)
-│       ├── Models/
-│       │   ├── CreateContainerRequest.cs # Request DTOs
-│       │   ├── KataContainerInfo.cs      # Response DTOs
-│       │   └── DeleteContainerResponse.cs
-│       ├── Services/
-│       │   ├── IKataContainerService.cs  # Service interface
-│       │   └── KataContainerService.cs   # Kubernetes operations
-│       ├── Program.cs                    # Application entry point
-│       ├── appsettings.json             # Configuration
-│       └── Dockerfile                    # Container build instructions
+│   ├── DonkeyWork.CodeSandbox.Manager/      # Manager API (container orchestration)
+│   │   ├── Configuration/
+│   │   │   └── KataContainerManager.cs      # Configuration models with validation
+│   │   ├── Endpoints/
+│   │   │   └── KataContainerEndpoints.cs    # Minimal API endpoints (/api/kata)
+│   │   ├── Models/
+│   │   │   ├── CreateContainerRequest.cs    # Request DTOs
+│   │   │   ├── KataContainerInfo.cs         # Response DTOs
+│   │   │   └── DeleteContainerResponse.cs
+│   │   ├── Services/
+│   │   │   ├── IKataContainerService.cs     # Service interface
+│   │   │   └── KataContainerService.cs      # Kubernetes operations
+│   │   ├── Program.cs                       # Application entry point
+│   │   └── appsettings.json                 # Configuration
+│   ├── DonkeyWork.CodeSandbox.Server/       # Executor API (code execution)
+│   │   ├── Controllers/
+│   │   │   └── ExecutionController.cs       # /api/execute endpoint
+│   │   ├── Services/
+│   │   │   └── ManagedProcess.cs            # Process management with streaming
+│   │   └── Program.cs
+│   ├── DonkeyWork.CodeSandbox.Contracts/    # Shared models
+│   │   ├── Events/
+│   │   │   └── ExecutionEvent.cs            # OutputEvent, CompletedEvent
+│   │   └── Requests/
+│   │       └── ExecuteCommand.cs
+│   └── DonkeyWork.CodeSandbox.Client/       # .NET client library
 ├── test/
-│   └── DonkeyWork.CodeSandbox-Manager.Tests/
-│       ├── Endpoints/
-│       │   └── KataContainerEndpointsTests.cs  # 15 endpoint tests
-│       └── Services/
-│           └── KataContainerServiceTests.cs    # 14 service tests
-├── k8s/
-│   ├── namespace.yaml            # Namespace definition
-│   ├── serviceaccount.yaml       # ServiceAccount
-│   ├── role.yaml                 # Role (RBAC)
-│   ├── rolebinding.yaml          # RoleBinding
-│   └── deployment.yaml           # Deployment + Service
+│   ├── DonkeyWork.CodeSandbox.Manager.Tests/
+│   └── DonkeyWork.CodeSandbox.Server.IntegrationTests/
+├── Dockerfile                               # Manager API container
+├── docker-compose.yml                       # Local development setup
 └── .github/workflows/
-    ├── pr-build-test.yml         # PR validation workflow
-    └── release.yml               # Release automation workflow
+    ├── pr-build-test.yml                    # PR validation workflow
+    └── release.yml                          # Release automation workflow
 ```
 
 ### Key Design Decisions

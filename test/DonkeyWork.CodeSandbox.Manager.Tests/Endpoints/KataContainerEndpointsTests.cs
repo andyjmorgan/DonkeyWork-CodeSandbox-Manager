@@ -1,14 +1,11 @@
 using DonkeyWork.CodeSandbox.Manager.Endpoints;
 using DonkeyWork.CodeSandbox.Manager.Models;
 using DonkeyWork.CodeSandbox.Manager.Services;
-using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Moq;
 using System.Reflection;
-using System.Text;
 using System.Text.Json;
 
 namespace DonkeyWork.CodeSandbox.Manager.Tests.Endpoints;
@@ -32,7 +29,6 @@ public class KataContainerEndpointsTests
         // Arrange
         var request = new CreateContainerRequest
         {
-            Image = "nginx:latest",
             WaitForReady = false
         };
 
@@ -69,7 +65,6 @@ public class KataContainerEndpointsTests
         // Arrange
         var request = new CreateContainerRequest
         {
-            Image = "nginx:latest",
             WaitForReady = true
         };
 
@@ -105,37 +100,10 @@ public class KataContainerEndpointsTests
     }
 
     [Fact]
-    public async Task CreateContainer_WithArgumentException_StreamsFailedEvent()
-    {
-        // Arrange
-        var request = new CreateContainerRequest
-        {
-            Image = "Invalid@Image"
-        };
-
-        _mockContainerService
-            .Setup(x => x.CreateContainerWithEventsAsync(request, It.IsAny<CancellationToken>()))
-            .Throws(new ArgumentException("Invalid image name format"));
-
-        // Act
-        var (sseEvents, _) = await InvokeCreateContainer(request);
-
-        // Assert
-        Assert.Single(sseEvents);
-        Assert.Equal("failed", sseEvents[0].EventType);
-        Assert.Contains("Validation error", ((ContainerFailedEvent)sseEvents[0]).Reason);
-
-        VerifyLogWarning(_mockLogger, "Invalid request to create container");
-    }
-
-    [Fact]
     public async Task CreateContainer_WithServiceException_StreamsFailedEvent()
     {
         // Arrange
-        var request = new CreateContainerRequest
-        {
-            Image = "nginx:latest"
-        };
+        var request = new CreateContainerRequest();
 
         _mockContainerService
             .Setup(x => x.CreateContainerWithEventsAsync(request, It.IsAny<CancellationToken>()))
@@ -469,6 +437,7 @@ public class KataContainerEndpointsTests
                 {
                     "created" => JsonSerializer.Deserialize<ContainerCreatedEvent>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }),
                     "waiting" => JsonSerializer.Deserialize<ContainerWaitingEvent>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }),
+                    "healthcheck" => JsonSerializer.Deserialize<ContainerHealthCheckEvent>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }),
                     "ready" => JsonSerializer.Deserialize<ContainerReadyEvent>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }),
                     "failed" => JsonSerializer.Deserialize<ContainerFailedEvent>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }),
                     _ => null

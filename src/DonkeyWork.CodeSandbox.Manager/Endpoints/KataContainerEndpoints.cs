@@ -59,8 +59,7 @@ public static class KataContainerEndpoints
         CancellationToken cancellationToken)
     {
         logger.LogInformation(
-            "Create container endpoint called. Image: {Image}, WaitForReady: {WaitForReady}",
-            request.Image ?? "(default)",
+            "Create container endpoint called. WaitForReady: {WaitForReady}",
             request.WaitForReady
         );
 

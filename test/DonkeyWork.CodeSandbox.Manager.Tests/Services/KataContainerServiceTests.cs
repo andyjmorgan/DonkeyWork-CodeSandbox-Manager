@@ -54,12 +54,9 @@ public class KataContainerServiceTests
     public async Task CreateContainerAsync_WithValidRequest_ReturnsContainerInfo()
     {
         // Arrange
-        var request = new CreateContainerRequest
-        {
-            Image = "nginx:latest"
-        };
+        var request = new CreateContainerRequest();
 
-        var createdPod = CreateSamplePod("kata-sandbox-12345678", "nginx:latest");
+        var createdPod = CreateSamplePod("kata-sandbox-12345678", _config.DefaultImage);
         var response = new HttpOperationResponse<V1Pod>
         {
             Body = createdPod
@@ -79,9 +76,9 @@ public class KataContainerServiceTests
         // Assert
         Assert.NotNull(result);
         Assert.StartsWith("kata-sandbox-", result.Name);
-        Assert.Equal("nginx:latest", result.Image);
+        Assert.Equal(_config.DefaultImage, result.Image);
 
-        VerifyLogInformation(_mockLogger, "Creating Kata container with image: nginx:latest");
+        VerifyLogInformation(_mockLogger, $"Creating Kata container with image: {_config.DefaultImage}");
         VerifyLogInformation(_mockLogger, "Successfully created Kata container:");
     }
 
@@ -91,7 +88,6 @@ public class KataContainerServiceTests
         // Arrange
         var request = new CreateContainerRequest
         {
-            Image = "ubuntu:latest",
             Labels = new Dictionary<string, string>
             {
                 ["custom-label"] = "test-value",
@@ -99,7 +95,7 @@ public class KataContainerServiceTests
             }
         };
 
-        var createdPod = CreateSamplePod("kata-sandbox-87654321", "ubuntu:latest");
+        var createdPod = CreateSamplePod("kata-sandbox-87654321", _config.DefaultImage);
         var response = new HttpOperationResponse<V1Pod>
         {
             Body = createdPod
@@ -121,16 +117,12 @@ public class KataContainerServiceTests
     }
 
     [Fact]
-    public async Task CreateContainerAsync_WithEmptyImageName_UsesDefaultImage()
+    public async Task CreateContainerAsync_AlwaysUsesDefaultImage()
     {
         // Arrange
-        var request = new CreateContainerRequest
-        {
-            Image = ""
-        };
+        var request = new CreateContainerRequest();
 
-        var defaultImage = "ubuntu:22.04";
-        var createdPod = CreateSamplePod($"kata-sandbox-12345678", defaultImage);
+        var createdPod = CreateSamplePod("kata-sandbox-12345678", _config.DefaultImage);
         var response = new HttpOperationResponse<V1Pod>
         {
             Body = createdPod
@@ -149,66 +141,14 @@ public class KataContainerServiceTests
 
         // Assert
         Assert.NotNull(result);
-        Assert.Equal(defaultImage, result.Image);
-    }
-
-    [Fact]
-    public async Task CreateContainerAsync_WithWhitespaceImageName_UsesDefaultImage()
-    {
-        // Arrange
-        var request = new CreateContainerRequest
-        {
-            Image = "   "
-        };
-
-        var defaultImage = "ubuntu:22.04";
-        var createdPod = CreateSamplePod($"kata-sandbox-12345678", defaultImage);
-        var response = new HttpOperationResponse<V1Pod>
-        {
-            Body = createdPod
-        };
-
-        _mockCoreV1
-            .Setup(x => x.CreateNamespacedPodWithHttpMessagesAsync(
-                It.IsAny<V1Pod>(),
-                It.IsAny<string>(),
-                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool?>(), It.IsAny<IReadOnlyDictionary<string, IReadOnlyList<string>>>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(response);
-
-        // Act
-        var result = await _service.CreateContainerAsync(request);
-
-        // Assert
-        Assert.NotNull(result);
-        Assert.Equal(defaultImage, result.Image);
-    }
-
-    [Fact]
-    public async Task CreateContainerAsync_WithInvalidImageFormat_ThrowsArgumentException()
-    {
-        // Arrange
-        var request = new CreateContainerRequest
-        {
-            Image = "Invalid@Image#Name"
-        };
-
-        // Act & Assert
-        var exception = await Assert.ThrowsAsync<ArgumentException>(
-            () => _service.CreateContainerAsync(request));
-
-        Assert.Contains("Invalid image name format", exception.Message);
-        Assert.Equal("Image", exception.ParamName);
+        Assert.Equal(_config.DefaultImage, result.Image);
     }
 
     [Fact]
     public async Task CreateContainerAsync_WhenKubernetesThrowsException_ThrowsAndLogsError()
     {
         // Arrange
-        var request = new CreateContainerRequest
-        {
-            Image = "nginx:latest"
-        };
+        var request = new CreateContainerRequest();
 
         var kubernetesException = new Exception("Kubernetes API error");
 
@@ -225,7 +165,7 @@ public class KataContainerServiceTests
             () => _service.CreateContainerAsync(request));
 
         Assert.Equal("Kubernetes API error", exception.Message);
-        VerifyLogError(_mockLogger, "Failed to create Kata container with image: nginx:latest");
+        VerifyLogError(_mockLogger, $"Failed to create Kata container with image: {_config.DefaultImage}");
     }
 
     #endregion
