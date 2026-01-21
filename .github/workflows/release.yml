@@ -106,11 +106,13 @@ jobs:
       matrix:
         include:
           - name: manager
+            image: donkeywork-codesandbox-manager
             dockerfile: ./Dockerfile
             context: .
             title: Kata Container Manager
             description: REST API for managing Kata containers in Kubernetes
           - name: executor
+            image: donkeywork-codesandbox-executor
             dockerfile: ./src/DonkeyWork.CodeSandbox.Server/Dockerfile
             context: .
             title: DonkeyWork CodeSandbox Server
@@ -140,7 +142,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ github.repository }}-${{ matrix.name }}
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}
           tags: |
             type=semver,pattern={{version}},value=${{ needs.semantic-version.outputs.version }}
             type=semver,pattern={{major}}.{{minor}},value=${{ needs.semantic-version.outputs.version }}
@@ -172,7 +174,7 @@ jobs:
         run: |
           echo "## ${{ matrix.title }} Published" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Image:** \`${{ env.REGISTRY }}/${{ github.repository }}-${{ matrix.name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Image:** \`${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}\`" >> $GITHUB_STEP_SUMMARY
           echo "**Version:** \`${{ needs.semantic-version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
           echo "**Digest:** \`${{ steps.build.outputs.digest }}\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -212,12 +214,12 @@ jobs:
           echo "" >> CHANGELOG.md
           echo "### Manager API" >> CHANGELOG.md
           echo "\`\`\`bash" >> CHANGELOG.md
-          echo "docker pull ${{ env.REGISTRY }}/${{ github.repository }}-manager:${{ needs.semantic-version.outputs.version }}" >> CHANGELOG.md
+          echo "docker pull ${{ env.REGISTRY }}/${{ github.repository_owner }}/donkeywork-codesandbox-manager:${{ needs.semantic-version.outputs.version }}" >> CHANGELOG.md
           echo "\`\`\`" >> CHANGELOG.md
           echo "" >> CHANGELOG.md
           echo "### Executor API" >> CHANGELOG.md
           echo "\`\`\`bash" >> CHANGELOG.md
-          echo "docker pull ${{ env.REGISTRY }}/${{ github.repository }}-executor:${{ needs.semantic-version.outputs.version }}" >> CHANGELOG.md
+          echo "docker pull ${{ env.REGISTRY }}/${{ github.repository_owner }}/donkeywork-codesandbox-executor:${{ needs.semantic-version.outputs.version }}" >> CHANGELOG.md
           echo "\`\`\`" >> CHANGELOG.md
           echo "" >> CHANGELOG.md
           echo "**Platforms:** linux/amd64, linux/arm64" >> CHANGELOG.md
@@ -254,6 +256,6 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Pull Images" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
-          echo "docker pull ${{ env.REGISTRY }}/${{ github.repository }}-manager:${{ needs.semantic-version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
-          echo "docker pull ${{ env.REGISTRY }}/${{ github.repository }}-executor:${{ needs.semantic-version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "docker pull ${{ env.REGISTRY }}/${{ github.repository_owner }}/donkeywork-codesandbox-manager:${{ needs.semantic-version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "docker pull ${{ env.REGISTRY }}/${{ github.repository_owner }}/donkeywork-codesandbox-executor:${{ needs.semantic-version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
