@@ -1,11 +1,18 @@
-# Kata Container Manager API
+# DonkeyWork CodeSandbox
 
 [![PR Build and Test](https://github.com/andyjmorgan/DonkeyWork-CodeSandbox-Manager/actions/workflows/pr-build-test.yml/badge.svg)](https://github.com/andyjmorgan/DonkeyWork-CodeSandbox-Manager/actions/workflows/pr-build-test.yml)
 [![Release](https://github.com/andyjmorgan/DonkeyWork-CodeSandbox-Manager/actions/workflows/release.yml/badge.svg)](https://github.com/andyjmorgan/DonkeyWork-CodeSandbox-Manager/actions/workflows/release.yml)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![.NET](https://img.shields.io/badge/.NET-10.0-512BD4)](https://dotnet.microsoft.com/)
 
-A REST API service for managing Kata containers (VM-isolated containers) in a Kubernetes (k3s) cluster. This service dynamically creates, lists, and deletes Kata containers in the `sandbox-containers` namespace.
+A unified monorepo containing both the **Manager API** (Kata container orchestration) and **Executor API** (sandboxed code execution with Python, Node.js, and bash support).
+
+## Components
+
+- **Manager API** (`src/DonkeyWork.CodeSandbox.Manager`): REST API service for managing Kata containers in a Kubernetes cluster
+- **Executor API** (`src/DonkeyWork.CodeSandbox.Server`): HTTP+SSE server for executing commands inside sandboxed containers
+- **Shared Contracts** (`src/DonkeyWork.CodeSandbox.Contracts`): Common models and contracts
+- **Client Library** (`src/DonkeyWork.CodeSandbox.Client`): .NET client for consuming the Executor API
 
 ## Features
 

@@ -2,7 +2,9 @@ version: '3.8'
 
 services:
   kata-container-manager:
-    image: ghcr.io/andyjmorgan/donkeywork-codesandbox-manager:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: kata-container-manager
     ports:
       - "8668:8668"
@@ -12,6 +14,7 @@ services:
       # Kubernetes Configuration
       - KataContainerManager__TargetNamespace=sandbox-containers
       - KataContainerManager__RuntimeClassName=kata-qemu
+      - KataContainerManager__DefaultImage=ghcr.io/andyjmorgan/donkeywork-codesandbox-manager-executor:latest
       - KataContainerManager__DefaultResourceRequests__MemoryMi=128
       - KataContainerManager__DefaultResourceRequests__CpuMillicores=250
       - KataContainerManager__DefaultResourceLimits__MemoryMi=512
@@ -35,6 +38,30 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+    networks:
+      - kata-network
+
+  code-execution-server:
+    build:
+      context: .
+      dockerfile: src/DonkeyWork.CodeSandbox.Server/Dockerfile
+    container_name: code-execution-server
+    ports:
+      - "8666:8666"
+    environment:
+      - ASPNETCORE_URLS=http://+:8666
+      - ASPNETCORE_ENVIRONMENT=Development
+      # Serilog Configuration
+      - Serilog__MinimumLevel__Default=Information
+      - Serilog__MinimumLevel__Override__Microsoft=Warning
+      - Serilog__MinimumLevel__Override__System=Warning
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8666/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
     networks:
       - kata-network
 

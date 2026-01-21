@@ -34,14 +34,14 @@ jobs:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
       - name: Restore dependencies
-        run: dotnet restore DonkeyWork.CodeSandbox-Manager.sln
+        run: dotnet restore DonkeyWork.CodeSandbox.sln
 
       - name: Build solution
-        run: dotnet build DonkeyWork.CodeSandbox-Manager.sln --configuration Release --no-restore
+        run: dotnet build DonkeyWork.CodeSandbox.sln --configuration Release --no-restore
 
       - name: Run unit tests
         run: |
-          dotnet test DonkeyWork.CodeSandbox-Manager.sln \
+          dotnet test DonkeyWork.CodeSandbox.sln \
             --configuration Release \
             --no-build \
             --verbosity normal \
@@ -114,10 +114,10 @@ jobs:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
       - name: Restore dependencies
-        run: dotnet restore DonkeyWork.CodeSandbox-Manager.sln
+        run: dotnet restore DonkeyWork.CodeSandbox.sln
 
       - name: Run dotnet format check
-        run: dotnet format DonkeyWork.CodeSandbox-Manager.sln --verify-no-changes --verbosity diagnostic
+        run: dotnet format DonkeyWork.CodeSandbox.sln --verify-no-changes --verbosity diagnostic
         continue-on-error: true
 
       - name: Security scan - Dependency check
