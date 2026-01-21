@@ -2,7 +2,6 @@ using System.Net.Http.Json;
 using System.Net.ServerSentEvents;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
-using DonkeyWork.CodeSandbox.Contracts;
 
 namespace DonkeyWork.CodeSandbox.Client;
 

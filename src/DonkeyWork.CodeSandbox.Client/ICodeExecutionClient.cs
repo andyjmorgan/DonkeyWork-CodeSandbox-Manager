@@ -1,5 +1,3 @@
-using DonkeyWork.CodeSandbox.Contracts;
-
 namespace DonkeyWork.CodeSandbox.Client;
 
 using DonkeyWork.CodeSandbox.Contracts.Events;

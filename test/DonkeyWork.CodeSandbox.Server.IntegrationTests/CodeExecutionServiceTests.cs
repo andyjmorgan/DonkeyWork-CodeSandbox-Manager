@@ -1,5 +1,4 @@
 using DonkeyWork.CodeSandbox.Client;
-using DonkeyWork.CodeSandbox.Contracts;
 using Xunit;
 
 namespace DonkeyWork.CodeSandbox.Server.IntegrationTests;

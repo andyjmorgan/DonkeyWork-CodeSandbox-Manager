@@ -1,7 +1,6 @@
 using System.Net.ServerSentEvents;
 using System.Runtime.CompilerServices;
 using Microsoft.AspNetCore.Mvc;
-using DonkeyWork.CodeSandbox.Contracts;
 using DonkeyWork.CodeSandbox.Server.Services;
 
 namespace DonkeyWork.CodeSandbox.Server.Controllers;
