@@ -220,15 +220,8 @@ public static class KataContainerEndpoints
             context.Response.Headers.CacheControl = "no-cache";
             context.Response.Headers.Connection = "keep-alive";
 
-            await foreach (var evt in containerService.ExecuteCommandAsync(sandboxId, request, cancellationToken))
-            {
-                // Serialize event to JSON
-                var json = System.Text.Json.JsonSerializer.Serialize(evt);
-
-                // Write SSE format
-                await context.Response.WriteAsync($"data: {json}\n\n", cancellationToken);
-                await context.Response.Body.FlushAsync(cancellationToken);
-            }
+            // Stream response directly from CodeExecution API to client
+            await containerService.ExecuteCommandAsync(sandboxId, request, context.Response.Body, cancellationToken);
         }
         catch (InvalidOperationException ex)
         {

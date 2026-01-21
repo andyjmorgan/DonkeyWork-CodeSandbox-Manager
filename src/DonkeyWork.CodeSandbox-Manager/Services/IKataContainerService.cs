@@ -11,7 +11,7 @@ public interface IKataContainerService
     Task<DeleteContainerResponse> DeleteContainerAsync(string podName, CancellationToken cancellationToken = default);
 
     // Execution passthrough methods
-    IAsyncEnumerable<ExecutionEvent> ExecuteCommandAsync(string sandboxId, ExecutionRequest request, CancellationToken cancellationToken = default);
+    Task ExecuteCommandAsync(string sandboxId, ExecutionRequest request, Stream responseStream, CancellationToken cancellationToken = default);
     Task<string> GetPodIpAsync(string sandboxId, CancellationToken cancellationToken = default);
     void UpdateLastActivity(string sandboxId);
     Task<DateTime?> GetLastActivityAsync(string sandboxId);

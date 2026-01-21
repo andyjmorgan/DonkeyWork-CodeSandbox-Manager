@@ -568,10 +568,11 @@ public class KataContainerService : IKataContainerService
     }
 
     // Execution passthrough implementation
-    public async IAsyncEnumerable<ExecutionEvent> ExecuteCommandAsync(
+    public async Task ExecuteCommandAsync(
         string sandboxId,
         ExecutionRequest request,
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+        Stream responseStream,
+        CancellationToken cancellationToken = default)
     {
         _logger.LogInformation("Executing command in sandbox {SandboxId}: {Command}", sandboxId, request.Command);
 
@@ -604,75 +605,11 @@ public class KataContainerService : IKataContainerService
             throw;
         }
 
+        // Stream the response directly through without parsing
         var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-        using var reader = new StreamReader(stream);
+        await stream.CopyToAsync(responseStream, cancellationToken);
 
-        while (!cancellationToken.IsCancellationRequested)
-        {
-            string? line;
-            try
-            {
-                line = await reader.ReadLineAsync(cancellationToken);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error reading from sandbox {SandboxId} stream", sandboxId);
-                yield break;
-            }
-
-            if (line == null)
-                break;
-
-            if (string.IsNullOrWhiteSpace(line))
-                continue;
-
-            // SSE format: "data: {json}"
-            if (line.StartsWith("data: "))
-            {
-                var jsonData = line.Substring(6);
-                var jsonDoc = JsonDocument.Parse(jsonData);
-                var root = jsonDoc.RootElement;
-
-                // Check if this is an OutputEvent or CompletedEvent
-                if (root.TryGetProperty("stream", out var streamProp))
-                {
-                    // OutputEvent
-                    // Handle data field which could be string, number, or other types
-                    var dataElement = root.GetProperty("data");
-                    string dataValue = dataElement.ValueKind switch
-                    {
-                        JsonValueKind.String => dataElement.GetString() ?? string.Empty,
-                        JsonValueKind.Number => dataElement.GetRawText(),
-                        JsonValueKind.True => "true",
-                        JsonValueKind.False => "false",
-                        JsonValueKind.Null => string.Empty,
-                        _ => dataElement.GetRawText()
-                    };
-
-                    var outputEvent = new OutputEvent
-                    {
-                        Pid = root.GetProperty("pid").GetInt32(),
-                        Stream = streamProp.GetString() ?? string.Empty,
-                        Data = dataValue
-                    };
-                    yield return outputEvent;
-                }
-                else if (root.TryGetProperty("exitCode", out var exitCodeProp))
-                {
-                    // CompletedEvent
-                    var completedEvent = new CompletedEvent
-                    {
-                        Pid = root.GetProperty("pid").GetInt32(),
-                        ExitCode = exitCodeProp.GetInt32(),
-                        TimedOut = root.GetProperty("timedOut").GetBoolean()
-                    };
-                    yield return completedEvent;
-
-                    _logger.LogInformation("Command completed in sandbox {SandboxId} with exit code {ExitCode}",
-                        sandboxId, completedEvent.ExitCode);
-                }
-            }
-        }
+        _logger.LogInformation("Command execution stream completed for sandbox {SandboxId}", sandboxId);
     }
 
     public async Task<string> GetPodIpAsync(string sandboxId, CancellationToken cancellationToken = default)
