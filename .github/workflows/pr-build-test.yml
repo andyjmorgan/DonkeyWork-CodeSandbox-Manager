@@ -67,8 +67,8 @@ jobs:
           path: ./TestResults
           retention-days: 30
 
-  docker-build:
-    name: Docker Build
+  docker-build-manager:
+    name: Docker Build Manager
     runs-on: ubuntu-latest
     needs: build-and-test
 
@@ -81,23 +81,56 @@ jobs:
         with:
           platforms: linux/amd64,linux/arm64
 
-      - name: Build Docker image
+      - name: Build Manager Docker image
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./Dockerfile
           push: false
-          tags: kata-container-manager:pr-${{ github.event.pull_request.number }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          tags: donkeywork-codesandbox-manager:pr-${{ github.event.pull_request.number }}
+          cache-from: type=gha,scope=manager
+          cache-to: type=gha,mode=max,scope=manager
           platforms: linux/amd64
-          outputs: type=docker,dest=/tmp/image.tar
+          outputs: type=docker,dest=/tmp/manager-image.tar
 
-      - name: Upload Docker image artifact
+      - name: Upload Manager Docker image artifact
         uses: actions/upload-artifact@v4
         with:
-          name: docker-image
-          path: /tmp/image.tar
+          name: docker-image-manager
+          path: /tmp/manager-image.tar
+          retention-days: 7
+
+  docker-build-executor:
+    name: Docker Build Executor
+    runs-on: ubuntu-latest
+    needs: build-and-test
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          platforms: linux/amd64,linux/arm64
+
+      - name: Build Executor Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./src/DonkeyWork.CodeSandbox.Server/Dockerfile
+          push: false
+          tags: donkeywork-codesandbox-executor:pr-${{ github.event.pull_request.number }}
+          cache-from: type=gha,scope=executor
+          cache-to: type=gha,mode=max,scope=executor
+          platforms: linux/amd64
+          outputs: type=docker,dest=/tmp/executor-image.tar
+
+      - name: Upload Executor Docker image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-image-executor
+          path: /tmp/executor-image.tar
           retention-days: 7
 
   lint-and-security:
@@ -127,14 +160,15 @@ jobs:
   pr-status-check:
     name: PR Status Check
     runs-on: ubuntu-latest
-    needs: [build-and-test, docker-build, lint-and-security]
+    needs: [build-and-test, docker-build-manager, docker-build-executor, lint-and-security]
     if: always()
 
     steps:
       - name: Check build status
         run: |
           if [ "${{ needs.build-and-test.result }}" != "success" ] || \
-             [ "${{ needs.docker-build.result }}" != "success" ]; then
+             [ "${{ needs.docker-build-manager.result }}" != "success" ] || \
+             [ "${{ needs.docker-build-executor.result }}" != "success" ]; then
             echo "Build or tests failed!"
             exit 1
           fi
