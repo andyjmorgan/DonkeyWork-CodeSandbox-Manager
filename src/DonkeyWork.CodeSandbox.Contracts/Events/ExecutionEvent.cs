@@ -5,6 +5,7 @@ namespace DonkeyWork.CodeSandbox.Contracts.Events;
 /// <summary>
 /// Type of output stream
 /// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
 public enum OutputStreamType
 {
     Stdout,

@@ -1,3 +1,4 @@
+using DonkeyWork.CodeSandbox.Manager.Filters;
 using DonkeyWork.CodeSandbox.Manager.Models;
 using DonkeyWork.CodeSandbox.Manager.Services;
 using Microsoft.AspNetCore.Http.HttpResults;
@@ -22,9 +23,11 @@ public static class KataContainerEndpoints
         group.MapGet("/", ListContainers)
             .WithName("ListContainers")
             .WithSummary("List all Kata containers")
-            .WithDescription("Retrieves a list of all Kata containers running in the sandbox-containers namespace")
+            .WithDescription("Retrieves a list of all Kata containers running in the sandbox-containers namespace. Requires API key.")
             .Produces<List<KataContainerInfo>>(StatusCodes.Status200OK)
-            .ProducesProblem(StatusCodes.Status500InternalServerError);
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status500InternalServerError)
+            .AddEndpointFilter<ApiKeyEndpointFilter>();
 
         group.MapGet("/{podName}", GetContainer)
             .WithName("GetContainer")
@@ -45,9 +48,11 @@ public static class KataContainerEndpoints
         group.MapDelete("/", DeleteAllContainers)
             .WithName("DeleteAllContainers")
             .WithSummary("Delete all Kata containers")
-            .WithDescription("Deletes all Kata containers in the sandbox-containers namespace")
+            .WithDescription("Deletes all Kata containers in the sandbox-containers namespace. Requires API key.")
             .Produces<DeleteAllContainersResponse>(StatusCodes.Status200OK)
-            .ProducesProblem(StatusCodes.Status500InternalServerError);
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status500InternalServerError)
+            .AddEndpointFilter<ApiKeyEndpointFilter>();
 
         group.MapPost("/{sandboxId}/execute", ExecuteCommand)
             .WithName("ExecuteCommand")

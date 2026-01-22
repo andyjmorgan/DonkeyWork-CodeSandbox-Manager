@@ -30,6 +30,15 @@ public class KataContainerManager
     [Range(30, 300, ErrorMessage = "Pod ready timeout must be between 30 and 300 seconds")]
     public int PodReadyTimeoutSeconds { get; set; } = 90;
 
+    [Range(1, 1440, ErrorMessage = "Idle timeout must be between 1 and 1440 minutes")]
+    public int IdleTimeoutMinutes { get; set; } = 15;
+
+    [Range(1, 60, ErrorMessage = "Cleanup check interval must be between 1 and 60 minutes")]
+    public int CleanupCheckIntervalMinutes { get; set; } = 1;
+
+    [Range(1, 1440, ErrorMessage = "Maximum container lifetime must be between 1 and 1440 minutes")]
+    public int MaxContainerLifetimeMinutes { get; set; } = 60;
+
     // Optional: Direct k8s connection (alternative to kubeconfig)
     public KubernetesConnectionConfig? Connection { get; set; }
 }

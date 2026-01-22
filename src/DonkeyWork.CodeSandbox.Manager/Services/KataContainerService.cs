@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
@@ -16,18 +15,20 @@ public class KataContainerService : IKataContainerService
     private readonly KataContainerManager _config;
     private readonly ILogger<KataContainerService> _logger;
     private readonly IHttpClientFactory _httpClientFactory;
-    private readonly ConcurrentDictionary<string, DateTime> _sandboxLastActivity = new();
+    private readonly IContainerRegistry _registry;
 
     public KataContainerService(
         IKubernetes client,
         IOptions<KataContainerManager> config,
         ILogger<KataContainerService> logger,
-        IHttpClientFactory httpClientFactory)
+        IHttpClientFactory httpClientFactory,
+        IContainerRegistry registry)
     {
         _client = client;
         _config = config.Value;
         _logger = logger;
         _httpClientFactory = httpClientFactory;
+        _registry = registry;
     }
 
     public async Task<KataContainerInfo> CreateContainerAsync(
@@ -50,6 +51,9 @@ public class KataContainerService : IKataContainerService
                 cancellationToken: cancellationToken);
 
             _logger.LogInformation("Successfully created Kata container: {PodName}", podName);
+
+            // Register container in the registry for tracking
+            _registry.RegisterContainer(podName, DateTime.UtcNow);
 
             // If WaitForReady is true, wait for the pod to be ready before returning
             if (request.WaitForReady)
@@ -123,6 +127,9 @@ public class KataContainerService : IKataContainerService
                 cancellationToken: cancellationToken);
 
             _logger.LogInformation("Successfully created Kata container: {PodName}", podName);
+
+            // Register container in the registry for tracking
+            _registry.RegisterContainer(podName, DateTime.UtcNow);
 
             // Emit created event
             writer.TryWrite(new ContainerCreatedEvent
@@ -328,6 +335,9 @@ public class KataContainerService : IKataContainerService
 
             _logger.LogInformation("Successfully deleted Kata container: {PodName}", podName);
 
+            // Unregister container from the registry
+            _registry.UnregisterContainer(podName);
+
             return new DeleteContainerResponse
             {
                 Success = true,
@@ -377,6 +387,9 @@ public class KataContainerService : IKataContainerService
                         _config.TargetNamespace,
                         body: new V1DeleteOptions { GracePeriodSeconds = 0 },
                         cancellationToken: cancellationToken);
+
+                    // Unregister container from the registry
+                    _registry.UnregisterContainer(container.Name);
 
                     response.DeletedPods.Add(container.Name);
                     response.DeletedCount++;
@@ -638,13 +651,13 @@ public class KataContainerService : IKataContainerService
 
     public void UpdateLastActivity(string sandboxId)
     {
-        _sandboxLastActivity.AddOrUpdate(sandboxId, DateTime.UtcNow, (_, _) => DateTime.UtcNow);
+        _registry.UpdateLastActivity(sandboxId);
         _logger.LogDebug("Updated last activity for sandbox {SandboxId}", sandboxId);
     }
 
     public Task<DateTime?> GetLastActivityAsync(string sandboxId)
     {
-        _sandboxLastActivity.TryGetValue(sandboxId, out var lastActivity);
-        return Task.FromResult<DateTime?>(lastActivity == default ? null : lastActivity);
+        var lastActivity = _registry.GetLastActivity(sandboxId);
+        return Task.FromResult(lastActivity);
     }
 }

@@ -65,8 +65,14 @@ builder.Services.AddSingleton<IKubernetes>(sp =>
 // Register HTTP client for passthrough requests
 builder.Services.AddHttpClient();
 
+// Register container registry as singleton (tracks all containers across requests)
+builder.Services.AddSingleton<IContainerRegistry, ContainerRegistry>();
+
 // Register application services
 builder.Services.AddScoped<IKataContainerService, KataContainerService>();
+
+// Register background cleanup service
+builder.Services.AddHostedService<ContainerCleanupService>();
 
 // Add health checks
 builder.Services.AddHealthChecks();

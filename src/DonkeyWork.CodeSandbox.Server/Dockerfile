@@ -21,10 +21,11 @@ FROM mcr.microsoft.com/dotnet/aspnet:10.0
 WORKDIR /app
 COPY --from=publish /app/publish .
 
-# Install bash, Python, and Node.js
+# Install bash, Python, Node.js, and common utilities
 RUN apt-get update && apt-get install -y \
     bash \
     curl \
+    iputils-ping \
     python3 \
     python3-pip \
     python3-venv \
