@@ -68,4 +68,11 @@ public class ContainerRegistry : IContainerRegistry
             .Select(kvp => kvp.Key)
             .ToList();
     }
+
+    public IReadOnlyDictionary<string, (DateTime CreatedAt, DateTime LastActivity)> GetAllContainers()
+    {
+        return _containers.ToDictionary(
+            kvp => kvp.Key,
+            kvp => (kvp.Value.CreatedAt, kvp.Value.LastActivity));
+    }
 }

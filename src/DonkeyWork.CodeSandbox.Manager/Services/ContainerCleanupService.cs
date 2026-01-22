@@ -46,6 +46,9 @@ public class ContainerCleanupService : BackgroundService
 
             try
             {
+                // Log current container status for debugging
+                LogContainerStatus(idleTimeout, maxLifetime);
+
                 // First clean up expired containers (hard limit)
                 await CleanupExpiredContainersAsync(maxLifetime, stoppingToken);
 
@@ -63,6 +66,36 @@ public class ContainerCleanupService : BackgroundService
         }
 
         _logger.LogInformation("Container cleanup service stopped");
+    }
+
+    private void LogContainerStatus(TimeSpan idleTimeout, TimeSpan maxLifetime)
+    {
+        var containers = _registry.GetAllContainers();
+        var now = DateTime.UtcNow;
+
+        if (containers.Count == 0)
+        {
+            _logger.LogInformation("Container status: No containers tracked");
+            return;
+        }
+
+        _logger.LogInformation("Container status: {Count} container(s) tracked", containers.Count);
+
+        foreach (var (podName, info) in containers)
+        {
+            var age = now - info.CreatedAt;
+            var idleTime = now - info.LastActivity;
+            var isIdle = idleTime >= idleTimeout;
+            var isExpired = age >= maxLifetime;
+
+            _logger.LogInformation(
+                "  {PodName}: Created {AgeMinutes:F1}m ago, Idle {IdleMinutes:F1}m {IdleStatus}{ExpiredStatus}",
+                podName,
+                age.TotalMinutes,
+                idleTime.TotalMinutes,
+                isIdle ? "(IDLE)" : "",
+                isExpired ? "(EXPIRED)" : "");
+        }
     }
 
     private async Task InitializeRegistryAsync(CancellationToken cancellationToken)

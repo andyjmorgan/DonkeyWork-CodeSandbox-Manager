@@ -39,4 +39,9 @@ public interface IContainerRegistry
     /// Get the count of tracked containers.
     /// </summary>
     int Count { get; }
+
+    /// <summary>
+    /// Get all tracked containers with their tracking info for debugging.
+    /// </summary>
+    IReadOnlyDictionary<string, (DateTime CreatedAt, DateTime LastActivity)> GetAllContainers();
 }
