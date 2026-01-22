@@ -91,3 +91,14 @@ export interface DeleteAllContainersResponse {
   deletedPods: string[];
   failedPods: string[];
 }
+
+// Allocation types
+export interface AllocateSandboxRequest {
+  userId: string;
+}
+
+export interface PoolStatusResponse {
+  warmCount: number;
+  allocatedCount: number;
+  totalCount: number;
+}
