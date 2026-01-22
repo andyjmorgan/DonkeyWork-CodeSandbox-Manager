@@ -173,15 +173,15 @@ public class KataContainerService : IKataContainerService
                             return;
                         }
 
-                        // Check if pod has failed
-                        if (currentPod.Status?.Phase == "Failed")
+                        // Check if pod has failed or completed (Succeeded means container exited, which is a failure for a long-running service)
+                        if (currentPod.Status?.Phase == "Failed" || currentPod.Status?.Phase == "Succeeded")
                         {
-                            _logger.LogWarning("Pod {PodName} failed during startup", podName);
+                            _logger.LogWarning("Pod {PodName} terminated during startup with phase: {Phase}", podName, currentPod.Status?.Phase);
 
                             writer.TryWrite(new ContainerFailedEvent
                             {
                                 PodName = podName,
-                                Reason = "Pod entered Failed state",
+                                Reason = $"Pod terminated with phase: {currentPod.Status?.Phase}",
                                 ContainerInfo = MapPodToContainerInfo(currentPod)
                             });
 
@@ -549,10 +549,10 @@ public class KataContainerService : IKataContainerService
                     return true;
                 }
 
-                // Check if pod has failed
-                if (pod.Status?.Phase == "Failed")
+                // Check if pod has failed or completed (Succeeded means container exited, which is a failure for a long-running service)
+                if (pod.Status?.Phase == "Failed" || pod.Status?.Phase == "Succeeded")
                 {
-                    _logger.LogWarning("Pod {PodName} failed during startup", podName);
+                    _logger.LogWarning("Pod {PodName} terminated during startup with phase: {Phase}", podName, pod.Status?.Phase);
                     return false;
                 }
 
