@@ -292,59 +292,58 @@ export function CommandExecutor({ sandboxId, creationInfo, onDelete }: CommandEx
   return (
     <div className="flex flex-col h-full">
       {/* Header with sandbox info and delete button */}
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-2">
-          <Terminal className="h-5 w-5" />
-          <span className="font-medium">Sandbox:</span>
-          <code className="text-sm bg-muted px-2 py-1 rounded">{sandboxId}</code>
+      <div className="flex items-center justify-between mb-4 gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <Terminal className="h-5 w-5 flex-shrink-0" />
+          <span className="font-medium hidden sm:inline">Sandbox:</span>
+          <code className="text-sm bg-muted px-2 py-1 rounded truncate">{sandboxId}</code>
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={queryContainerInfo} disabled={isQuerying}>
-            {isQuerying ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Search className="h-4 w-4 mr-1" />}
-            Query Info
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <Button variant="outline" size="sm" onClick={queryContainerInfo} disabled={isQuerying} title="Query Info">
+            {isQuerying ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+            <span className="hidden sm:inline ml-1">Query Info</span>
           </Button>
           {executions.length > 0 && (
-            <Button variant="outline" size="sm" onClick={clearExecutions}>
-              Clear History
+            <Button variant="outline" size="sm" onClick={clearExecutions} title="Clear History">
+              <Trash2 className="h-4 w-4" />
+              <span className="hidden sm:inline ml-1">Clear History</span>
             </Button>
           )}
-          <Button variant="destructive" size="sm" onClick={deleteSandbox}>
-            <Trash2 className="h-4 w-4 mr-1" />
-            Delete Sandbox
+          <Button variant="destructive" size="sm" onClick={deleteSandbox} title="Delete Sandbox">
+            <Trash2 className="h-4 w-4" />
+            <span className="hidden sm:inline ml-1">Delete</span>
           </Button>
         </div>
       </div>
 
       {/* Command Input - Fixed at top */}
-      <div className="border border-border rounded-lg p-4 bg-muted/30 mb-4">
-        <div className="flex items-center justify-between mb-2">
-          <label className="text-sm font-medium">Command</label>
+      <div className="border border-border rounded-lg p-3 sm:p-4 bg-muted/30 mb-4">
+        <Textarea
+          value={command}
+          onChange={(e) => setCommand(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder="Enter command (e.g., ls -la)&#10;Ctrl+Enter to execute"
+          disabled={isExecuting}
+          className="w-full font-mono bg-background border-2 border-muted-foreground/30 min-h-[60px] sm:min-h-[80px] resize-y mb-3"
+          rows={2}
+        />
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div className="flex items-center gap-2">
-            <label className="text-xs text-muted-foreground">Timeout (s):</label>
+            <label className="text-xs text-muted-foreground whitespace-nowrap">Timeout:</label>
             <Input
               type="number"
               value={timeout}
               onChange={(e) => setTimeout(Math.max(1, Math.min(600, parseInt(e.target.value) || 300)))}
-              className="w-20 h-8 text-sm"
+              className="w-16 h-8 text-sm"
               min={1}
               max={600}
             />
+            <span className="text-xs text-muted-foreground">sec</span>
           </div>
-        </div>
-        <div className="flex gap-2">
-          <Textarea
-            value={command}
-            onChange={(e) => setCommand(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Enter command (e.g., ls -la, echo 'Hello World')&#10;Multi-line commands supported"
-            disabled={isExecuting}
-            className="flex-1 font-mono bg-background border-2 border-muted-foreground/30 min-h-[80px] resize-y"
-            rows={3}
-          />
           <Button
             onClick={executeCommand}
             disabled={!command.trim() || isExecuting}
-            className="self-end"
+            className="w-full sm:w-auto"
           >
             {isExecuting ? (
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -354,7 +353,6 @@ export function CommandExecutor({ sandboxId, creationInfo, onDelete }: CommandEx
             <span className="ml-2">Execute</span>
           </Button>
         </div>
-        <p className="text-xs text-muted-foreground mt-2">Press Ctrl+Enter (Cmd+Enter on Mac) to execute</p>
       </div>
 
       {/* Execution History - Full Width */}
@@ -397,7 +395,7 @@ function ExecutionCard({ execution, onToggle, formatTime, formatDateTime, trunca
       <div className="border border-border rounded-lg bg-card overflow-hidden">
         {/* Card Header */}
         <div
-          className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-muted/50 transition-colors"
+          className="flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-3 cursor-pointer hover:bg-muted/50 transition-colors"
           onClick={onToggle}
         >
           <button className="flex-shrink-0">
@@ -408,15 +406,15 @@ function ExecutionCard({ execution, onToggle, formatTime, formatDateTime, trunca
             )}
           </button>
 
-          <span className="text-sm text-muted-foreground flex-shrink-0">
+          <span className="text-sm text-muted-foreground flex-shrink-0 hidden sm:inline">
             {formatTime(startedAt)}
           </span>
 
-          <span className="text-xs bg-purple-500/20 text-purple-600 dark:text-purple-400 px-1.5 py-0.5 rounded">
+          <span className="text-xs bg-purple-500/20 text-purple-600 dark:text-purple-400 px-1.5 py-0.5 rounded flex-shrink-0">
             CREATED
           </span>
 
-          <span className="text-sm truncate flex-1">
+          <span className="text-sm truncate flex-1 min-w-0 hidden sm:inline">
             Sandbox Created
           </span>
 
@@ -424,7 +422,7 @@ function ExecutionCard({ execution, onToggle, formatTime, formatDateTime, trunca
             {creationInfo.elapsedSeconds.toFixed(1)}s
           </span>
 
-          <span className="text-xs px-2 py-1 rounded bg-green-500/20 text-green-600 dark:text-green-400 flex-shrink-0">
+          <span className="text-xs px-1.5 sm:px-2 py-1 rounded bg-green-500/20 text-green-600 dark:text-green-400 flex-shrink-0">
             Ready
           </span>
         </div>
@@ -512,7 +510,7 @@ function ExecutionCard({ execution, onToggle, formatTime, formatDateTime, trunca
     <div className="border border-border rounded-lg bg-card overflow-hidden">
       {/* Card Header - Clickable to expand/collapse */}
       <div
-        className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-muted/50 transition-colors"
+        className="flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-3 cursor-pointer hover:bg-muted/50 transition-colors"
         onClick={onToggle}
       >
         <button className="flex-shrink-0">
@@ -523,28 +521,32 @@ function ExecutionCard({ execution, onToggle, formatTime, formatDateTime, trunca
           )}
         </button>
 
-        <span className="text-sm text-muted-foreground flex-shrink-0">
+        <span className="text-sm text-muted-foreground flex-shrink-0 hidden sm:inline">
           {formatTime(startedAt)}
         </span>
 
-        {type === 'query' && (
-          <span className="text-xs bg-blue-500/20 text-blue-600 dark:text-blue-400 px-1.5 py-0.5 rounded">
+        {type === 'query' ? (
+          <span className="text-xs bg-blue-500/20 text-blue-600 dark:text-blue-400 px-1.5 py-0.5 rounded flex-shrink-0">
             QUERY
+          </span>
+        ) : (
+          <span className="text-xs bg-orange-500/20 text-orange-600 dark:text-orange-400 px-1.5 py-0.5 rounded flex-shrink-0">
+            CMD
           </span>
         )}
 
-        <code className="text-sm font-mono truncate flex-1" title={command}>
+        <code className="text-sm font-mono truncate flex-1 min-w-0" title={command}>
           {truncateCommand(command, 16)}
         </code>
 
         {timeout && type === 'command' && (
-          <span className="text-xs text-muted-foreground flex-shrink-0">
+          <span className="text-xs text-muted-foreground flex-shrink-0 hidden sm:inline">
             {timeout}s
           </span>
         )}
 
         <span className={cn(
-          "text-xs px-2 py-1 rounded flex-shrink-0",
+          "text-xs px-1.5 sm:px-2 py-1 rounded flex-shrink-0",
           status === 'running' && "bg-yellow-500/20 text-yellow-600 dark:text-yellow-400",
           status === 'completed' && exitCode === 0 && "bg-green-500/20 text-green-600 dark:text-green-400",
           status === 'completed' && exitCode !== 0 && "bg-red-500/20 text-red-600 dark:text-red-400",
@@ -553,10 +555,14 @@ function ExecutionCard({ execution, onToggle, formatTime, formatDateTime, trunca
           {status === 'running' && (
             <span className="flex items-center gap-1">
               <Loader2 className="h-3 w-3 animate-spin" />
-              Running
+              <span className="hidden sm:inline">Running</span>
             </span>
           )}
-          {status === 'completed' && `Exit: ${exitCode}${timedOut ? ' (timeout)' : ''}`}
+          {status === 'completed' && (
+            <span>
+              <span className="hidden sm:inline">Exit: </span>{exitCode}{timedOut ? ' (t/o)' : ''}
+            </span>
+          )}
           {status === 'error' && 'Error'}
         </span>
       </div>
@@ -565,9 +571,9 @@ function ExecutionCard({ execution, onToggle, formatTime, formatDateTime, trunca
       {isExpanded && (
         <div className="border-t border-border">
           {/* Full Command */}
-          <div className="px-4 py-2 bg-muted/30 border-b border-border">
-            <span className="text-xs text-muted-foreground">Command:</span>
-            <code className="block font-mono text-sm mt-1 break-all whitespace-pre-wrap">{command}</code>
+          <div className="px-3 sm:px-4 py-2 bg-muted/30 border-b border-border">
+            <span className="text-xs text-muted-foreground hidden sm:inline">Command:</span>
+            <code className="block font-mono text-sm sm:mt-1 break-all whitespace-pre-wrap">{command}</code>
           </div>
 
           {/* Output Tabs - Full Width */}
