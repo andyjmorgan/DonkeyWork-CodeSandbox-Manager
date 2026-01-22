@@ -291,7 +291,8 @@ public class PoolManager : IPoolManager
                         pod.Status?.Reason ?? "Unknown",
                         pod.Status?.Message ?? "No message");
 
-                    var poolStatus = pod.Metadata.Labels?.GetValueOrDefault(PoolStatusLabel);
+                    string? poolStatus = null;
+                    pod.Metadata.Labels?.TryGetValue(PoolStatusLabel, out poolStatus);
 
                     // Delete the failed pod
                     await DeletePodAsync(podName, cancellationToken);
@@ -308,7 +309,8 @@ public class PoolManager : IPoolManager
                 {
                     _logger.LogInformation("Pod {PodName} in Succeeded state, cleaning up", podName);
 
-                    var poolStatus = pod.Metadata.Labels?.GetValueOrDefault(PoolStatusLabel);
+                    string? poolStatus = null;
+                    pod.Metadata.Labels?.TryGetValue(PoolStatusLabel, out poolStatus);
 
                     await DeletePodAsync(podName, cancellationToken);
 
