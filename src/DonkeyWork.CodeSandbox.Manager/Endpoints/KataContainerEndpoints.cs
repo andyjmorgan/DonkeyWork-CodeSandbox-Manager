@@ -342,14 +342,21 @@ public static class KataContainerEndpoints
     {
         try
         {
-            var warmCount = await poolManager.GetWarmPoolCountAsync(cancellationToken);
-            var allocatedCount = await poolManager.GetAllocatedCountAsync(cancellationToken);
+            var stats = await poolManager.GetPoolStatisticsAsync(cancellationToken);
 
             var response = new PoolStatusResponse
             {
-                WarmCount = warmCount,
-                AllocatedCount = allocatedCount,
-                TotalCount = warmCount + allocatedCount
+                Creating = stats.Creating,
+                Warm = stats.Warm,
+                Allocated = stats.Allocated,
+                Total = stats.Total,
+                TargetSize = stats.TargetSize,
+                ReadyPercentage = stats.ReadyPercentage,
+                UtilizationPercentage = stats.UtilizationPercentage,
+                // Legacy fields for backward compatibility
+                WarmCount = stats.Warm,
+                AllocatedCount = stats.Allocated,
+                TotalCount = stats.Total
             };
 
             return TypedResults.Ok(response);
@@ -367,6 +374,15 @@ public static class KataContainerEndpoints
 
 public record PoolStatusResponse
 {
+    public int Creating { get; init; }
+    public int Warm { get; init; }
+    public int Allocated { get; init; }
+    public int Total { get; init; }
+    public int TargetSize { get; init; }
+    public double ReadyPercentage { get; init; }
+    public double UtilizationPercentage { get; init; }
+
+    // Legacy fields for backward compatibility
     public int WarmCount { get; init; }
     public int AllocatedCount { get; init; }
     public int TotalCount { get; init; }

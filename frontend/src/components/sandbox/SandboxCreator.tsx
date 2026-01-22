@@ -4,6 +4,7 @@ import { Progress } from '@/components/ui/progress'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Plus, Loader2, CheckCircle, XCircle, Box, Terminal, Zap, Shield, Gauge } from 'lucide-react'
 import type { ContainerEvent, ContainerReadyEvent, KataContainerInfo, PoolStatusResponse } from '@/types/api'
+import { PoolChart } from './PoolChart'
 
 export interface CreationInfo {
   podName: string
@@ -301,36 +302,21 @@ export function SandboxCreator({ onSandboxCreated }: SandboxCreatorProps) {
         </p>
       </div>
 
-      {/* Pool Status Banner */}
+      {/* Pool Status Banner with Chart */}
       {poolStatus && state.status === 'idle' && (
-        <div className="border border-border rounded-lg p-4 bg-gradient-to-r from-primary/10 to-primary/5">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-md bg-primary/20">
-                <Gauge className="h-5 w-5 text-primary" />
-              </div>
-              <div>
-                <h3 className="font-semibold">Warm Pool Status</h3>
-                <p className="text-sm text-muted-foreground">
-                  {poolStatus.warmCount} sandboxes ready for instant allocation
-                </p>
-              </div>
+        <div className="border border-border rounded-lg p-4 bg-card">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="p-2 rounded-md bg-primary/20">
+              <Gauge className="h-5 w-5 text-primary" />
             </div>
-            <div className="flex gap-4 text-sm">
-              <div className="text-center">
-                <div className="text-2xl font-bold text-green-600 dark:text-green-400">
-                  {poolStatus.warmCount}
-                </div>
-                <div className="text-muted-foreground">Warm</div>
-              </div>
-              <div className="text-center">
-                <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">
-                  {poolStatus.allocatedCount}
-                </div>
-                <div className="text-muted-foreground">In Use</div>
-              </div>
+            <div>
+              <h3 className="font-semibold">Warm Pool Status</h3>
+              <p className="text-sm text-muted-foreground">
+                {poolStatus.warm} sandboxes ready for instant allocation
+              </p>
             </div>
           </div>
+          <PoolChart poolStatus={poolStatus} />
         </div>
       )}
 

@@ -23,6 +23,16 @@ public interface IPoolManager
     Task<int> GetAllocatedCountAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Gets the current count of creating sandboxes.
+    /// </summary>
+    Task<int> GetCreatingCountAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Gets detailed pool statistics including all machine states.
+    /// </summary>
+    Task<PoolStatistics> GetPoolStatisticsAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Creates warm sandboxes to fill the pool up to the target size.
     /// Only should be called by the leader.
     /// </summary>

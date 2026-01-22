@@ -145,6 +145,75 @@ public class PoolManager : IPoolManager
         }
     }
 
+    public async Task<int> GetCreatingCountAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var creatingPods = await _client.CoreV1.ListNamespacedPodAsync(
+                _config.TargetNamespace,
+                labelSelector: $"{PoolStatusLabel}={PoolStatusCreating}",
+                cancellationToken: cancellationToken);
+
+            return creatingPods.Items.Count;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to get creating count");
+            return 0;
+        }
+    }
+
+    public async Task<PoolStatistics> GetPoolStatisticsAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            // Fetch all counts in parallel for efficiency
+            var creatingTask = GetCreatingCountAsync(cancellationToken);
+            var warmTask = GetWarmPoolCountAsync(cancellationToken);
+            var allocatedTask = GetAllocatedCountAsync(cancellationToken);
+
+            await Task.WhenAll(creatingTask, warmTask, allocatedTask);
+
+            var creating = await creatingTask;
+            var warm = await warmTask;
+            var allocated = await allocatedTask;
+            var total = creating + warm + allocated;
+
+            var readyPercentage = _config.WarmPoolSize > 0
+                ? (warm / (double)_config.WarmPoolSize) * 100.0
+                : 0.0;
+
+            var utilizationPercentage = total > 0
+                ? (allocated / (double)total) * 100.0
+                : 0.0;
+
+            return new PoolStatistics
+            {
+                Creating = creating,
+                Warm = warm,
+                Allocated = allocated,
+                Total = total,
+                TargetSize = _config.WarmPoolSize,
+                ReadyPercentage = Math.Round(readyPercentage, 1),
+                UtilizationPercentage = Math.Round(utilizationPercentage, 1)
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to get pool statistics");
+            return new PoolStatistics
+            {
+                Creating = 0,
+                Warm = 0,
+                Allocated = 0,
+                Total = 0,
+                TargetSize = _config.WarmPoolSize,
+                ReadyPercentage = 0,
+                UtilizationPercentage = 0
+            };
+        }
+    }
+
     public async Task BackfillPoolAsync(CancellationToken cancellationToken = default)
     {
         try
