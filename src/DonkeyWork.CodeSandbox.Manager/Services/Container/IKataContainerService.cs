@@ -1,6 +1,6 @@
 using DonkeyWork.CodeSandbox.Manager.Models;
 
-namespace DonkeyWork.CodeSandbox.Manager.Services;
+namespace DonkeyWork.CodeSandbox.Manager.Services.Container;
 
 public interface IKataContainerService
 {
@@ -14,6 +14,6 @@ public interface IKataContainerService
     // Execution passthrough methods
     Task ExecuteCommandAsync(string sandboxId, ExecutionRequest request, Stream responseStream, CancellationToken cancellationToken = default);
     Task<string> GetPodIpAsync(string sandboxId, CancellationToken cancellationToken = default);
-    void UpdateLastActivity(string sandboxId);
-    Task<DateTime?> GetLastActivityAsync(string sandboxId);
+    Task UpdateLastActivityAsync(string sandboxId, CancellationToken cancellationToken = default);
+    Task<DateTime?> GetLastActivityAsync(string sandboxId, CancellationToken cancellationToken = default);
 }

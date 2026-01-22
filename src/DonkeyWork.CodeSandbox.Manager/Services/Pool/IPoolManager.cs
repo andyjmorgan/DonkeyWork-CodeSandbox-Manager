@@ -1,6 +1,6 @@
 using DonkeyWork.CodeSandbox.Manager.Models;
 
-namespace DonkeyWork.CodeSandbox.Manager.Services;
+namespace DonkeyWork.CodeSandbox.Manager.Services.Pool;
 
 public interface IPoolManager
 {

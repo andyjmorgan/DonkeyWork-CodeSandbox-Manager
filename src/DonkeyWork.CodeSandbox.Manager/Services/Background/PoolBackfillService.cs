@@ -1,10 +1,11 @@
 using DonkeyWork.CodeSandbox.Manager.Configuration;
+using DonkeyWork.CodeSandbox.Manager.Services.Pool;
 using k8s;
 using k8s.LeaderElection;
 using k8s.LeaderElection.ResourceLock;
 using Microsoft.Extensions.Options;
 
-namespace DonkeyWork.CodeSandbox.Manager.Services;
+namespace DonkeyWork.CodeSandbox.Manager.Services.Background;
 
 /// <summary>
 /// Background service that uses Kubernetes leader election to ensure only one manager
@@ -36,47 +37,54 @@ public class PoolBackfillService : BackgroundService
     {
         _logger.LogInformation("PoolBackfillService starting with identity: {Identity}", _identity);
 
-        // Create the lease-based resource lock
-        var resourceLock = new LeaseLock(
-            _client,
-            _config.TargetNamespace,
-            "pool-backfill-leader",
-            _identity);
-
-        // Configure leader election
-        var electionConfig = new LeaderElectionConfig(resourceLock)
-        {
-            LeaseDuration = TimeSpan.FromSeconds(_config.LeaderLeaseDurationSeconds),
-            RetryPeriod = TimeSpan.FromSeconds(_config.LeaderLeaseDurationSeconds / 3),
-            RenewDeadline = TimeSpan.FromSeconds(_config.LeaderLeaseDurationSeconds * 2 / 3)
-        };
-
-        // Run leader election
-        var leaderElector = new LeaderElector(electionConfig);
-
-        leaderElector.OnStartedLeading += () =>
-        {
-            _logger.LogInformation("🎖️  I am now the LEADER for pool backfill");
-            _leaderLoopCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
-            _ = Task.Run(() => BackfillLoop(_leaderLoopCts.Token), stoppingToken);
-        };
-
-        leaderElector.OnStoppedLeading += () =>
-        {
-            _logger.LogWarning("❌ Lost leadership for pool backfill");
-            _leaderLoopCts?.Cancel();
-        };
-
-        leaderElector.OnNewLeader += (newLeader) =>
-        {
-            if (newLeader != _identity)
-            {
-                _logger.LogInformation("New leader elected: {Leader}", newLeader);
-            }
-        };
-
         try
         {
+            // Create the lease-based resource lock
+            _logger.LogInformation("Creating lease lock for namespace: {Namespace}", _config.TargetNamespace);
+            var resourceLock = new LeaseLock(
+                _client,
+                _config.TargetNamespace,
+                "pool-backfill-leader",
+                _identity);
+
+            // Configure leader election
+            _logger.LogInformation("Configuring leader election (LeaseDuration={LeaseDuration}s, RetryPeriod={RetryPeriod}s, RenewDeadline={RenewDeadline}s)",
+                _config.LeaderLeaseDurationSeconds,
+                _config.LeaderLeaseDurationSeconds / 3,
+                _config.LeaderLeaseDurationSeconds * 2 / 3);
+
+            var electionConfig = new LeaderElectionConfig(resourceLock)
+            {
+                LeaseDuration = TimeSpan.FromSeconds(_config.LeaderLeaseDurationSeconds),
+                RetryPeriod = TimeSpan.FromSeconds(_config.LeaderLeaseDurationSeconds / 3),
+                RenewDeadline = TimeSpan.FromSeconds(_config.LeaderLeaseDurationSeconds * 2 / 3)
+            };
+
+            // Run leader election
+            var leaderElector = new LeaderElector(electionConfig);
+
+            leaderElector.OnStartedLeading += () =>
+            {
+                _logger.LogInformation("🎖️  I am now the LEADER for pool backfill");
+                _leaderLoopCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+                _ = Task.Run(() => BackfillLoop(_leaderLoopCts.Token), stoppingToken);
+            };
+
+            leaderElector.OnStoppedLeading += () =>
+            {
+                _logger.LogWarning("❌ Lost leadership for pool backfill");
+                _leaderLoopCts?.Cancel();
+            };
+
+            leaderElector.OnNewLeader += (newLeader) =>
+            {
+                if (newLeader != _identity)
+                {
+                    _logger.LogInformation("New leader elected: {Leader}", newLeader);
+                }
+            };
+
+            _logger.LogInformation("Starting leader election...");
             await leaderElector.RunUntilLeadershipLostAsync(stoppingToken);
         }
         catch (OperationCanceledException)
@@ -85,7 +93,7 @@ public class PoolBackfillService : BackgroundService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "PoolBackfillService encountered an error");
+            _logger.LogError(ex, "PoolBackfillService encountered an error during leader election");
             throw;
         }
     }

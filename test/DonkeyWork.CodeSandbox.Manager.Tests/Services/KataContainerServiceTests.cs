@@ -1,6 +1,6 @@
 using DonkeyWork.CodeSandbox.Manager.Configuration;
 using DonkeyWork.CodeSandbox.Manager.Models;
-using DonkeyWork.CodeSandbox.Manager.Services;
+using DonkeyWork.CodeSandbox.Manager.Services.Container;
 using k8s;
 using k8s.Autorest;
 using k8s.Models;
@@ -18,7 +18,6 @@ public class KataContainerServiceTests
     private readonly Mock<ILogger<KataContainerService>> _mockLogger;
     private readonly Mock<IOptions<KataContainerManager>> _mockOptions;
     private readonly Mock<IHttpClientFactory> _mockHttpClientFactory;
-    private readonly Mock<IContainerRegistry> _mockRegistry;
     private readonly KataContainerManager _config;
     private readonly KataContainerService _service;
 
@@ -29,7 +28,6 @@ public class KataContainerServiceTests
         _mockLogger = new Mock<ILogger<KataContainerService>>();
         _mockOptions = new Mock<IOptions<KataContainerManager>>();
         _mockHttpClientFactory = new Mock<IHttpClientFactory>();
-        _mockRegistry = new Mock<IContainerRegistry>();
 
         _config = new KataContainerManager
         {
@@ -47,8 +45,7 @@ public class KataContainerServiceTests
             _mockKubernetesClient.Object,
             _mockOptions.Object,
             _mockLogger.Object,
-            _mockHttpClientFactory.Object,
-            _mockRegistry.Object);
+            _mockHttpClientFactory.Object);
     }
 
     #region CreateContainerAsync Tests

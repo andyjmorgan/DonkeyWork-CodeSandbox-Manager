@@ -1,6 +1,8 @@
 using DonkeyWork.CodeSandbox.Manager.Configuration;
 using DonkeyWork.CodeSandbox.Manager.Endpoints;
-using DonkeyWork.CodeSandbox.Manager.Services;
+using DonkeyWork.CodeSandbox.Manager.Services.Background;
+using DonkeyWork.CodeSandbox.Manager.Services.Container;
+using DonkeyWork.CodeSandbox.Manager.Services.Pool;
 using k8s;
 using Microsoft.Extensions.Options;
 using Scalar.AspNetCore;
@@ -64,9 +66,6 @@ builder.Services.AddSingleton<IKubernetes>(sp =>
 
 // Register HTTP client for passthrough requests
 builder.Services.AddHttpClient();
-
-// Register container registry as singleton (tracks all containers across requests)
-builder.Services.AddSingleton<IContainerRegistry, ContainerRegistry>();
 
 // Register application services
 builder.Services.AddScoped<IKataContainerService, KataContainerService>();

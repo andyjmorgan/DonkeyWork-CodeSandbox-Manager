@@ -6,34 +6,35 @@ using k8s.Autorest;
 using k8s.Models;
 using Microsoft.Extensions.Options;
 
-namespace DonkeyWork.CodeSandbox.Manager.Services;
+namespace DonkeyWork.CodeSandbox.Manager.Services.Pool;
 
 public class PoolManager : IPoolManager
 {
     private readonly IKubernetes _client;
     private readonly KataContainerManager _config;
     private readonly ILogger<PoolManager> _logger;
-    private readonly IContainerRegistry _registry;
 
-    // Pool status labels
+    // Pool status labels (for k8s label selectors)
     private const string PoolStatusLabel = "pool-status";
     private const string PoolStatusWarm = "warm";
     private const string PoolStatusAllocated = "allocated";
     private const string PoolStatusCreating = "creating";
     private const string AllocatedToLabel = "allocated-to";
-    private const string AllocatedAtLabel = "allocated-at";
     private const string ManagerIdLabel = "manager-id";
+
+    // Annotations for timestamps (source of truth for time-based data)
+    internal const string CreatedAtAnnotation = "codesandbox.donkeywork.dev/created-at";
+    internal const string AllocatedAtAnnotation = "codesandbox.donkeywork.dev/allocated-at";
+    internal const string LastActivityAnnotation = "codesandbox.donkeywork.dev/last-activity";
 
     public PoolManager(
         IKubernetes client,
         IOptions<KataContainerManager> config,
-        ILogger<PoolManager> logger,
-        IContainerRegistry registry)
+        ILogger<PoolManager> logger)
     {
         _client = client;
         _config = config.Value;
         _logger = logger;
-        _registry = registry;
     }
 
     public async Task<KataContainerInfo?> AllocateWarmSandboxAsync(string userId, CancellationToken cancellationToken = default)
@@ -71,10 +72,16 @@ public class PoolManager : IPoolManager
                 _logger.LogInformation("Attempting to allocate warm sandbox {PodName} to user {UserId}",
                     podName, userId);
 
-                // Atomically update labels using resourceVersion (optimistic locking)
+                // Atomically update labels and annotations using resourceVersion (optimistic locking)
+                var nowTimestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString();
+
                 pod.Metadata.Labels[PoolStatusLabel] = PoolStatusAllocated;
                 pod.Metadata.Labels[AllocatedToLabel] = userId;
-                pod.Metadata.Labels[AllocatedAtLabel] = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString();
+
+                // Use annotations for timestamps (source of truth)
+                pod.Metadata.Annotations ??= new Dictionary<string, string>();
+                pod.Metadata.Annotations[AllocatedAtAnnotation] = nowTimestamp;
+                pod.Metadata.Annotations[LastActivityAnnotation] = nowTimestamp;
 
                 var updatedPod = await _client.CoreV1.ReplaceNamespacedPodAsync(
                     pod,
@@ -84,9 +91,6 @@ public class PoolManager : IPoolManager
 
                 _logger.LogInformation("Successfully allocated sandbox {PodName} to user {UserId}",
                     podName, userId);
-
-                // Register/update activity in registry
-                _registry.RegisterContainer(podName, DateTime.UtcNow);
 
                 return MapPodToContainerInfo(updatedPod);
             }
@@ -345,8 +349,6 @@ public class PoolManager : IPoolManager
                 _config.TargetNamespace,
                 cancellationToken: cancellationToken);
 
-            _registry.RegisterContainer(podName, DateTime.UtcNow);
-
             _logger.LogInformation("Warm sandbox {PodName} created, waiting for ready state", podName);
 
             // Start background task to monitor this pod and update its status to "warm" when ready
@@ -449,15 +451,22 @@ public class PoolManager : IPoolManager
     private V1Pod BuildWarmPodSpec(string podName)
     {
         var managerId = Environment.MachineName;
+        var nowTimestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString();
 
         var labels = new Dictionary<string, string>
         {
             ["app"] = "kata-manager",
             ["runtime"] = "kata",
             ["managed-by"] = "CodeSandbox-Manager",
-            ["created-at"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(),
             [PoolStatusLabel] = PoolStatusCreating,  // Start as "creating"
             [ManagerIdLabel] = managerId
+        };
+
+        // Annotations for timestamps (source of truth)
+        var annotations = new Dictionary<string, string>
+        {
+            [CreatedAtAnnotation] = nowTimestamp,
+            [LastActivityAnnotation] = nowTimestamp
         };
 
         var container = new V1Container
@@ -476,7 +485,8 @@ public class PoolManager : IPoolManager
             {
                 Name = podName,
                 NamespaceProperty = _config.TargetNamespace,
-                Labels = labels
+                Labels = labels,
+                Annotations = annotations
             },
             Spec = new V1PodSpec
             {
@@ -520,8 +530,6 @@ public class PoolManager : IPoolManager
                 body: new V1DeleteOptions { GracePeriodSeconds = 0 },
                 cancellationToken: cancellationToken);
 
-            _registry.UnregisterContainer(podName);
-
             _logger.LogInformation("Successfully deleted pod {PodName}", podName);
         }
         catch (HttpOperationException ex) when (ex.Response.StatusCode == HttpStatusCode.NotFound)
@@ -552,6 +560,14 @@ public class PoolManager : IPoolManager
 
         var containerImage = pod.Spec?.Containers?.FirstOrDefault()?.Image;
 
+        // Get last activity from annotation
+        DateTime? lastActivity = null;
+        if (pod.Metadata.Annotations?.TryGetValue(LastActivityAnnotation, out var lastActivityStr) == true
+            && long.TryParse(lastActivityStr, out var lastActivityUnix))
+        {
+            lastActivity = DateTimeOffset.FromUnixTimeSeconds(lastActivityUnix).UtcDateTime;
+        }
+
         return new KataContainerInfo
         {
             Name = pod.Metadata.Name,
@@ -562,7 +578,20 @@ public class PoolManager : IPoolManager
             PodIP = pod.Status?.PodIP,
             Labels = pod.Metadata.Labels != null ? new Dictionary<string, string>(pod.Metadata.Labels) : null,
             Image = containerImage,
-            LastActivity = _registry.GetLastActivity(pod.Metadata.Name)
+            LastActivity = lastActivity
         };
+    }
+
+    /// <summary>
+    /// Helper to parse Unix timestamp from annotation.
+    /// </summary>
+    internal static DateTime? ParseTimestampAnnotation(IDictionary<string, string>? annotations, string key)
+    {
+        if (annotations?.TryGetValue(key, out var timestampStr) == true
+            && long.TryParse(timestampStr, out var unixTimestamp))
+        {
+            return DateTimeOffset.FromUnixTimeSeconds(unixTimestamp).UtcDateTime;
+        }
+        return null;
     }
 }

@@ -1,7 +1,8 @@
 using DonkeyWork.CodeSandbox.Manager.Configuration;
+using DonkeyWork.CodeSandbox.Manager.Services.Pool;
 using Microsoft.Extensions.Options;
 
-namespace DonkeyWork.CodeSandbox.Manager.Services;
+namespace DonkeyWork.CodeSandbox.Manager.Services.Background;
 
 /// <summary>
 /// Background service that monitors pods for Failed/Succeeded states and handles cleanup.

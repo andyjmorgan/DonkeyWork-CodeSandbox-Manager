@@ -3,11 +3,12 @@ using System.Text;
 using System.Text.Json;
 using DonkeyWork.CodeSandbox.Manager.Configuration;
 using DonkeyWork.CodeSandbox.Manager.Models;
+using DonkeyWork.CodeSandbox.Manager.Services.Pool;
 using k8s;
 using k8s.Models;
 using Microsoft.Extensions.Options;
 
-namespace DonkeyWork.CodeSandbox.Manager.Services;
+namespace DonkeyWork.CodeSandbox.Manager.Services.Container;
 
 public class KataContainerService : IKataContainerService
 {
@@ -15,20 +16,17 @@ public class KataContainerService : IKataContainerService
     private readonly KataContainerManager _config;
     private readonly ILogger<KataContainerService> _logger;
     private readonly IHttpClientFactory _httpClientFactory;
-    private readonly IContainerRegistry _registry;
 
     public KataContainerService(
         IKubernetes client,
         IOptions<KataContainerManager> config,
         ILogger<KataContainerService> logger,
-        IHttpClientFactory httpClientFactory,
-        IContainerRegistry registry)
+        IHttpClientFactory httpClientFactory)
     {
         _client = client;
         _config = config.Value;
         _logger = logger;
         _httpClientFactory = httpClientFactory;
-        _registry = registry;
     }
 
     public async Task<KataContainerInfo> CreateContainerAsync(
@@ -51,9 +49,6 @@ public class KataContainerService : IKataContainerService
                 cancellationToken: cancellationToken);
 
             _logger.LogInformation("Successfully created Kata container: {PodName}", podName);
-
-            // Register container in the registry for tracking
-            _registry.RegisterContainer(podName, DateTime.UtcNow);
 
             // If WaitForReady is true, wait for the pod to be ready before returning
             if (request.WaitForReady)
@@ -127,9 +122,6 @@ public class KataContainerService : IKataContainerService
                 cancellationToken: cancellationToken);
 
             _logger.LogInformation("Successfully created Kata container: {PodName}", podName);
-
-            // Register container in the registry for tracking
-            _registry.RegisterContainer(podName, DateTime.UtcNow);
 
             // Emit created event
             writer.TryWrite(new ContainerCreatedEvent
@@ -297,12 +289,7 @@ public class KataContainerService : IKataContainerService
 
             var kataContainers = podList.Items
                 .Where(p => p.Spec.RuntimeClassName == _config.RuntimeClassName)
-                .Select(p =>
-                {
-                    var info = MapPodToContainerInfo(p);
-                    info.LastActivity = _registry.GetLastActivity(p.Metadata.Name);
-                    return info;
-                })
+                .Select(MapPodToContainerInfo)
                 .ToList();
 
             _logger.LogInformation("Found {Count} Kata containers", kataContainers.Count);
@@ -335,9 +322,7 @@ public class KataContainerService : IKataContainerService
                 return null;
             }
 
-            var containerInfo = MapPodToContainerInfo(pod);
-            containerInfo.LastActivity = _registry.GetLastActivity(podName);
-            return containerInfo;
+            return MapPodToContainerInfo(pod);
         }
         catch (k8s.Autorest.HttpOperationException ex) when (ex.Response.StatusCode == System.Net.HttpStatusCode.NotFound)
         {
@@ -366,9 +351,6 @@ public class KataContainerService : IKataContainerService
                 cancellationToken: cancellationToken);
 
             _logger.LogInformation("Successfully deleted Kata container: {PodName}", podName);
-
-            // Unregister container from the registry
-            _registry.UnregisterContainer(podName);
 
             return new DeleteContainerResponse
             {
@@ -419,9 +401,6 @@ public class KataContainerService : IKataContainerService
                         _config.TargetNamespace,
                         body: new V1DeleteOptions { GracePeriodSeconds = 0 },
                         cancellationToken: cancellationToken);
-
-                    // Unregister container from the registry
-                    _registry.UnregisterContainer(container.Name);
 
                     response.DeletedPods.Add(container.Name);
                     response.DeletedCount++;
@@ -546,6 +525,11 @@ public class KataContainerService : IKataContainerService
 
         var containerImage = pod.Spec?.Containers?.FirstOrDefault()?.Image;
 
+        // Read last activity from annotation (source of truth)
+        var lastActivity = PoolManager.ParseTimestampAnnotation(
+            pod.Metadata.Annotations,
+            PoolManager.LastActivityAnnotation);
+
         return new KataContainerInfo
         {
             Name = pod.Metadata.Name,
@@ -555,7 +539,8 @@ public class KataContainerService : IKataContainerService
             NodeName = pod.Spec?.NodeName,
             PodIP = pod.Status?.PodIP,
             Labels = pod.Metadata.Labels != null ? new Dictionary<string, string>(pod.Metadata.Labels) : null,
-            Image = containerImage
+            Image = containerImage,
+            LastActivity = lastActivity
         };
     }
 
@@ -623,8 +608,8 @@ public class KataContainerService : IKataContainerService
     {
         _logger.LogInformation("Executing command in sandbox {SandboxId}: {Command}", sandboxId, request.Command);
 
-        // Update last activity time
-        UpdateLastActivity(sandboxId);
+        // Update last activity time (fire and forget - don't block command execution)
+        _ = UpdateLastActivityAsync(sandboxId, cancellationToken);
 
         // Get pod IP
         var podIp = await GetPodIpAsync(sandboxId, cancellationToken);
@@ -681,16 +666,49 @@ public class KataContainerService : IKataContainerService
         }
     }
 
-    public void UpdateLastActivity(string sandboxId)
+    public async Task UpdateLastActivityAsync(string sandboxId, CancellationToken cancellationToken = default)
     {
-        _registry.UpdateLastActivity(sandboxId);
-        _logger.LogDebug("Updated last activity for sandbox {SandboxId}", sandboxId);
+        try
+        {
+            var nowTimestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString();
+
+            // Use JSON patch to update only the annotation
+            var patch = new V1Patch(
+                $"[{{\"op\": \"replace\", \"path\": \"/metadata/annotations/{PoolManager.LastActivityAnnotation.Replace("/", "~1")}\", \"value\": \"{nowTimestamp}\"}}]",
+                V1Patch.PatchType.JsonPatch);
+
+            await _client.CoreV1.PatchNamespacedPodAsync(
+                patch,
+                sandboxId,
+                _config.TargetNamespace,
+                cancellationToken: cancellationToken);
+
+            _logger.LogDebug("Updated last activity annotation for sandbox {SandboxId}", sandboxId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to update last activity for sandbox {SandboxId}", sandboxId);
+        }
     }
 
-    public Task<DateTime?> GetLastActivityAsync(string sandboxId)
+    public async Task<DateTime?> GetLastActivityAsync(string sandboxId, CancellationToken cancellationToken = default)
     {
-        var lastActivity = _registry.GetLastActivity(sandboxId);
-        return Task.FromResult(lastActivity);
+        try
+        {
+            var pod = await _client.CoreV1.ReadNamespacedPodAsync(
+                sandboxId,
+                _config.TargetNamespace,
+                cancellationToken: cancellationToken);
+
+            return PoolManager.ParseTimestampAnnotation(
+                pod.Metadata.Annotations,
+                PoolManager.LastActivityAnnotation);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to get last activity for sandbox {SandboxId}", sandboxId);
+            return null;
+        }
     }
 
     private async Task CleanupFailedPodAsync(string podName, CancellationToken cancellationToken)
@@ -703,7 +721,6 @@ public class KataContainerService : IKataContainerService
                 _config.TargetNamespace,
                 body: new V1DeleteOptions { GracePeriodSeconds = 0 },
                 cancellationToken: cancellationToken);
-            _registry.UnregisterContainer(podName);
             _logger.LogInformation("Successfully cleaned up failed pod {PodName}", podName);
         }
         catch (Exception ex)
