@@ -70,9 +70,12 @@ builder.Services.AddSingleton<IContainerRegistry, ContainerRegistry>();
 
 // Register application services
 builder.Services.AddScoped<IKataContainerService, KataContainerService>();
+builder.Services.AddScoped<IPoolManager, PoolManager>();
 
-// Register background cleanup service
+// Register background services
 builder.Services.AddHostedService<ContainerCleanupService>();
+builder.Services.AddHostedService<PoolBackfillService>();
+builder.Services.AddHostedService<PoolMonitoringService>();
 
 // Add health checks
 builder.Services.AddHealthChecks();

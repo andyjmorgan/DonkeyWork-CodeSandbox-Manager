@@ -39,6 +39,16 @@ public class KataContainerManager
     [Range(1, 1440, ErrorMessage = "Maximum container lifetime must be between 1 and 1440 minutes")]
     public int MaxContainerLifetimeMinutes { get; set; } = 60;
 
+    // Pool management settings
+    [Range(0, 100, ErrorMessage = "Warm pool size must be between 0 and 100")]
+    public int WarmPoolSize { get; set; } = 10;
+
+    [Range(10, 300, ErrorMessage = "Pool backfill check interval must be between 10 and 300 seconds")]
+    public int PoolBackfillCheckIntervalSeconds { get; set; } = 30;
+
+    [Range(5, 60, ErrorMessage = "Lease duration must be between 5 and 60 seconds")]
+    public int LeaderLeaseDurationSeconds { get; set; } = 15;
+
     // Optional: Direct k8s connection (alternative to kubeconfig)
     public KubernetesConnectionConfig? Connection { get; set; }
 }

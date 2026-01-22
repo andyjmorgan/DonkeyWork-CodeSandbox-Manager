@@ -188,13 +188,38 @@ public class KataContainerService : IKataContainerService
                             return;
                         }
 
-                        // Emit waiting event
+                        // Get detailed container status
+                        var containerStatus = currentPod.Status?.ContainerStatuses?.FirstOrDefault();
+                        string detailedMessage = $"Waiting for pod to be ready (attempt {attemptNumber})";
+
+                        if (containerStatus?.State?.Waiting != null)
+                        {
+                            var waiting = containerStatus.State.Waiting;
+                            var reason = waiting.Reason ?? "Unknown";
+                            var message = waiting.Message ?? "";
+
+                            // Provide user-friendly messages
+                            detailedMessage = reason switch
+                            {
+                                "ContainerCreating" => "Creating container...",
+                                "PodInitializing" => "Initializing pod...",
+                                "ErrImagePull" => $"Error pulling image: {message}",
+                                "ImagePullBackOff" => $"Failed to pull image, retrying: {message}",
+                                _ => $"{reason}: {message}"
+                            };
+                        }
+                        else if (containerStatus?.State?.Running != null)
+                        {
+                            detailedMessage = "Container running, waiting for readiness checks...";
+                        }
+
+                        // Emit waiting event with detailed status
                         writer.TryWrite(new ContainerWaitingEvent
                         {
                             PodName = podName,
                             AttemptNumber = attemptNumber,
                             Phase = currentPod.Status?.Phase ?? "Unknown",
-                            Message = $"Waiting for pod to be ready (attempt {attemptNumber})"
+                            Message = detailedMessage
                         });
                     }
                     catch (Exception ex)

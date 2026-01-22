@@ -1,9 +1,10 @@
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Plus, Loader2, CheckCircle, XCircle, Box, Terminal, Zap, Shield } from 'lucide-react'
-import type { ContainerEvent, ContainerReadyEvent } from '@/types/api'
+import { Plus, Loader2, CheckCircle, XCircle, Box, Terminal, Zap, Shield, Gauge } from 'lucide-react'
+import type { ContainerEvent, ContainerReadyEvent, KataContainerInfo, PoolStatusResponse } from '@/types/api'
+import { PoolChart } from './PoolChart'
 
 export interface CreationInfo {
   podName: string
@@ -42,9 +43,101 @@ export function SandboxCreator({ onSandboxCreated }: SandboxCreatorProps) {
     elapsedSeconds: 0,
   })
 
+  const [poolStatus, setPoolStatus] = useState<PoolStatusResponse | null>(null)
+  const [useAdvancedCreate, setUseAdvancedCreate] = useState(false)
+
   // Ref to track if callback has been called for current creation
   const callbackCalledRef = useRef(false)
 
+  // Fetch pool status on mount and periodically
+  useEffect(() => {
+    const fetchPoolStatus = async () => {
+      try {
+        const response = await fetch('/api/kata/pool/status')
+        if (response.ok) {
+          const data = await response.json()
+          setPoolStatus(data)
+        }
+      } catch (error) {
+        console.error('Failed to fetch pool status:', error)
+      }
+    }
+
+    fetchPoolStatus()
+    const interval = setInterval(fetchPoolStatus, 10000) // Refresh every 10s
+    return () => clearInterval(interval)
+  }, [])
+
+  // Quick allocation from warm pool (default method)
+  const allocateSandbox = useCallback(async () => {
+    callbackCalledRef.current = false
+    setState({
+      status: 'creating',
+      podName: null,
+      progress: 50,
+      message: 'Allocating sandbox from warm pool...',
+      events: [],
+      rawMessages: [],
+      elapsedSeconds: 0,
+    })
+
+    try {
+      const startTime = Date.now()
+      const response = await fetch('/api/kata/allocate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          userId: `user-${Date.now()}`,
+        }),
+      })
+
+      const elapsedSeconds = (Date.now() - startTime) / 1000
+
+      if (!response.ok) {
+        if (response.status === 503) {
+          throw new Error('No warm sandboxes available. Try again in a moment or use advanced create.')
+        }
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+
+      const containerInfo: KataContainerInfo = await response.json()
+
+      setState({
+        status: 'success',
+        podName: containerInfo.name,
+        progress: 100,
+        message: `Sandbox ${containerInfo.name} allocated!`,
+        events: [],
+        rawMessages: [],
+        elapsedSeconds,
+        containerInfo,
+      })
+
+      // Call parent callback
+      onSandboxCreated(containerInfo.name, {
+        podName: containerInfo.name,
+        createdAt: new Date(),
+        elapsedSeconds,
+        events: [],
+        rawMessages: [],
+        containerInfo,
+      })
+    } catch (error) {
+      setState({
+        status: 'error',
+        podName: null,
+        progress: 0,
+        message: error instanceof Error ? error.message : 'Failed to allocate sandbox',
+        events: [],
+        rawMessages: [],
+        elapsedSeconds: 0,
+      })
+    }
+  }, [onSandboxCreated])
+
+  // Advanced create with streaming (fallback method)
   const createSandbox = useCallback(async () => {
     callbackCalledRef.current = false
     setState({
@@ -204,14 +297,44 @@ export function SandboxCreator({ onSandboxCreated }: SandboxCreatorProps) {
       <div className="text-center py-8">
         <h2 className="text-3xl font-bold mb-3">Kata Sandbox Manager</h2>
         <p className="text-muted-foreground max-w-2xl mx-auto">
-          Create isolated, secure sandbox environments powered by Kata Containers.
+          Get instant access to pre-warmed sandbox environments powered by Kata Containers.
           Execute commands in real-time with full streaming output.
         </p>
       </div>
 
+      {/* Pool Status Banner with Chart */}
+      {poolStatus && state.status === 'idle' && (
+        <div className="border border-border rounded-lg p-4 bg-card">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="p-2 rounded-md bg-primary/20">
+              <Gauge className="h-5 w-5 text-primary" />
+            </div>
+            <div>
+              <h3 className="font-semibold">Warm Pool Status</h3>
+              <p className="text-sm text-muted-foreground">
+                {poolStatus.warm} sandboxes ready for instant allocation
+              </p>
+            </div>
+          </div>
+          <PoolChart poolStatus={poolStatus} />
+        </div>
+      )}
+
       {/* Feature Cards */}
       {state.status === 'idle' && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+          <div className="border border-border rounded-lg p-4 bg-card">
+            <div className="flex items-center gap-3 mb-2">
+              <div className="p-2 rounded-md bg-primary/10">
+                <Zap className="h-5 w-5 text-primary" />
+              </div>
+              <h3 className="font-semibold">Instant Allocation</h3>
+            </div>
+            <p className="text-sm text-muted-foreground">
+              Get a pre-warmed sandbox in milliseconds. No waiting for pod creation or image pulls.
+            </p>
+          </div>
+
           <div className="border border-border rounded-lg p-4 bg-card">
             <div className="flex items-center gap-3 mb-2">
               <div className="p-2 rounded-md bg-primary/10">
@@ -227,24 +350,12 @@ export function SandboxCreator({ onSandboxCreated }: SandboxCreatorProps) {
           <div className="border border-border rounded-lg p-4 bg-card">
             <div className="flex items-center gap-3 mb-2">
               <div className="p-2 rounded-md bg-primary/10">
-                <Zap className="h-5 w-5 text-primary" />
+                <Terminal className="h-5 w-5 text-primary" />
               </div>
               <h3 className="font-semibold">Real-time Streaming</h3>
             </div>
             <p className="text-sm text-muted-foreground">
-              Stream command output in real-time via SSE. See stdout and stderr as they happen.
-            </p>
-          </div>
-
-          <div className="border border-border rounded-lg p-4 bg-card">
-            <div className="flex items-center gap-3 mb-2">
-              <div className="p-2 rounded-md bg-primary/10">
-                <Terminal className="h-5 w-5 text-primary" />
-              </div>
-              <h3 className="font-semibold">Full Shell Access</h3>
-            </div>
-            <p className="text-sm text-muted-foreground">
-              Execute any bash command in your sandbox. Perfect for testing, debugging, and automation.
+              Stream command output via SSE. See stdout and stderr as they happen with exit codes.
             </p>
           </div>
         </div>
@@ -258,15 +369,15 @@ export function SandboxCreator({ onSandboxCreated }: SandboxCreatorProps) {
             API Endpoints
           </h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-            <div className="bg-muted/50 rounded p-3">
+            <div className="bg-muted/50 rounded p-3 ring-2 ring-primary/50">
               <code className="text-green-600 dark:text-green-400">POST</code>
-              <code className="ml-2">/api/kata</code>
-              <p className="text-muted-foreground text-xs mt-1">Create a new sandbox (SSE stream)</p>
+              <code className="ml-2">/api/kata/allocate</code>
+              <p className="text-muted-foreground text-xs mt-1">⚡ Instant allocation from warm pool</p>
             </div>
             <div className="bg-muted/50 rounded p-3">
               <code className="text-blue-600 dark:text-blue-400">GET</code>
-              <code className="ml-2">/api/kata/{'{id}'}</code>
-              <p className="text-muted-foreground text-xs mt-1">Get sandbox details</p>
+              <code className="ml-2">/api/kata/pool/status</code>
+              <p className="text-muted-foreground text-xs mt-1">Get pool status</p>
             </div>
             <div className="bg-muted/50 rounded p-3">
               <code className="text-green-600 dark:text-green-400">POST</code>
@@ -285,18 +396,44 @@ export function SandboxCreator({ onSandboxCreated }: SandboxCreatorProps) {
       {/* Create Button - Always visible at top */}
       <div className="border border-border rounded-lg p-4 bg-card">
         <div className={`flex items-center justify-between ${state.status !== 'idle' ? 'mb-4' : ''}`}>
-          <h3 className="text-lg font-semibold">Create New Sandbox</h3>
-          {state.status === 'idle' && (
-            <Button onClick={createSandbox} size="lg">
-              <Plus className="h-4 w-4 mr-2" />
-              Create Sandbox
-            </Button>
-          )}
-          {(state.status === 'success' || state.status === 'error') && (
-            <Button variant="outline" onClick={reset}>
-              Create Another
-            </Button>
-          )}
+          <div>
+            <h3 className="text-lg font-semibold">
+              {useAdvancedCreate ? 'Create New Sandbox' : 'Get Instant Sandbox'}
+            </h3>
+            {state.status === 'idle' && (
+              <p className="text-sm text-muted-foreground mt-1">
+                {useAdvancedCreate
+                  ? 'Create from scratch with streaming progress'
+                  : 'Allocate from warm pool (instant)'
+                }
+              </p>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            {state.status === 'idle' && (
+              <>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setUseAdvancedCreate(!useAdvancedCreate)}
+                >
+                  {useAdvancedCreate ? '⚡ Quick Mode' : '🔧 Advanced'}
+                </Button>
+                <Button
+                  onClick={useAdvancedCreate ? createSandbox : allocateSandbox}
+                  size="lg"
+                >
+                  <Plus className="h-4 w-4 mr-2" />
+                  {useAdvancedCreate ? 'Create' : 'Allocate'}
+                </Button>
+              </>
+            )}
+            {(state.status === 'success' || state.status === 'error') && (
+              <Button variant="outline" onClick={reset}>
+                Get Another
+              </Button>
+            )}
+          </div>
         </div>
 
         {state.status !== 'idle' && (
@@ -326,7 +463,21 @@ export function SandboxCreator({ onSandboxCreated }: SandboxCreatorProps) {
               </TabsList>
               <TabsContent value="output" className="mt-2">
                 <div className="bg-muted rounded-md p-3 max-h-48 overflow-y-auto">
-                  {state.events.length === 0 ? (
+                  {state.events.length === 0 && state.status === 'success' ? (
+                    <div className="text-sm">
+                      <div className="flex items-center gap-2 text-green-600 dark:text-green-400">
+                        <CheckCircle className="h-4 w-4" />
+                        <span>Sandbox allocated from warm pool in {state.elapsedSeconds.toFixed(2)}s</span>
+                      </div>
+                      {state.containerInfo && (
+                        <div className="mt-2 space-y-1 text-muted-foreground">
+                          <div>Pod: {state.containerInfo.name}</div>
+                          <div>IP: {state.containerInfo.podIP}</div>
+                          <div>Node: {state.containerInfo.nodeName || 'N/A'}</div>
+                        </div>
+                      )}
+                    </div>
+                  ) : state.events.length === 0 ? (
                     <p className="text-sm text-muted-foreground">Waiting for events...</p>
                   ) : (
                     <ul className="space-y-1 text-sm">

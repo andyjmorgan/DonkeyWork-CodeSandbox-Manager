@@ -61,6 +61,22 @@ public static class KataContainerEndpoints
             .Produces<ExecutionEvent>(StatusCodes.Status200OK, "text/event-stream")
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
+
+        group.MapPost("/allocate", AllocateSandbox)
+            .WithName("AllocateSandbox")
+            .WithSummary("Allocate a warm sandbox from the pool")
+            .WithDescription("Atomically allocates a pre-warmed sandbox from the pool to a user. If no warm sandboxes are available, returns 503 Service Unavailable.")
+            .Produces<KataContainerInfo>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status500InternalServerError);
+
+        group.MapGet("/pool/status", GetPoolStatus)
+            .WithName("GetPoolStatus")
+            .WithSummary("Get warm pool status")
+            .WithDescription("Returns the current status of the warm sandbox pool including warm count and allocated count")
+            .Produces<PoolStatusResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status500InternalServerError);
     }
 
     private static async Task CreateContainer(
@@ -280,4 +296,94 @@ public static class KataContainerEndpoints
             await context.Response.WriteAsync($"data: {errorJson}\n\n", cancellationToken);
         }
     }
+
+    private static async Task<Results<Ok<KataContainerInfo>, StatusCodeHttpResult, BadRequest<string>, ProblemHttpResult>> AllocateSandbox(
+        AllocateSandboxRequest request,
+        IPoolManager poolManager,
+        ILogger<Program> logger,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(request.UserId))
+            {
+                return TypedResults.BadRequest("UserId is required");
+            }
+
+            logger.LogInformation("Allocating warm sandbox for user: {UserId}", request.UserId);
+
+            var container = await poolManager.AllocateWarmSandboxAsync(request.UserId, cancellationToken);
+
+            if (container == null)
+            {
+                logger.LogWarning("No warm sandboxes available for user: {UserId}", request.UserId);
+                return TypedResults.StatusCode(StatusCodes.Status503ServiceUnavailable);
+            }
+
+            logger.LogInformation("Successfully allocated sandbox {PodName} to user {UserId}",
+                container.Name, request.UserId);
+
+            return TypedResults.Ok(container);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to allocate sandbox for user: {UserId}", request.UserId);
+            return TypedResults.Problem(
+                detail: ex.Message,
+                statusCode: StatusCodes.Status500InternalServerError,
+                title: "Failed to allocate sandbox");
+        }
+    }
+
+    private static async Task<Results<Ok<PoolStatusResponse>, ProblemHttpResult>> GetPoolStatus(
+        IPoolManager poolManager,
+        ILogger<Program> logger,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var stats = await poolManager.GetPoolStatisticsAsync(cancellationToken);
+
+            var response = new PoolStatusResponse
+            {
+                Creating = stats.Creating,
+                Warm = stats.Warm,
+                Allocated = stats.Allocated,
+                Total = stats.Total,
+                TargetSize = stats.TargetSize,
+                ReadyPercentage = stats.ReadyPercentage,
+                UtilizationPercentage = stats.UtilizationPercentage,
+                // Legacy fields for backward compatibility
+                WarmCount = stats.Warm,
+                AllocatedCount = stats.Allocated,
+                TotalCount = stats.Total
+            };
+
+            return TypedResults.Ok(response);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to get pool status");
+            return TypedResults.Problem(
+                detail: ex.Message,
+                statusCode: StatusCodes.Status500InternalServerError,
+                title: "Failed to get pool status");
+        }
+    }
+}
+
+public record PoolStatusResponse
+{
+    public int Creating { get; init; }
+    public int Warm { get; init; }
+    public int Allocated { get; init; }
+    public int Total { get; init; }
+    public int TargetSize { get; init; }
+    public double ReadyPercentage { get; init; }
+    public double UtilizationPercentage { get; init; }
+
+    // Legacy fields for backward compatibility
+    public int WarmCount { get; init; }
+    public int AllocatedCount { get; init; }
+    public int TotalCount { get; init; }
 }
