@@ -586,17 +586,6 @@ function ExecutionCard({ execution, onToggle, formatTime, formatDateTime, trunca
                 Output
               </TabsTrigger>
               <TabsTrigger
-                value="stderr"
-                className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary px-4 py-2 relative"
-              >
-                Stderr
-                {stderr && (
-                  <span className="ml-1 bg-destructive text-destructive-foreground text-xs rounded-full px-1.5">
-                    !
-                  </span>
-                )}
-              </TabsTrigger>
-              <TabsTrigger
                 value="debug"
                 className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary px-4 py-2"
               >
@@ -606,22 +595,17 @@ function ExecutionCard({ execution, onToggle, formatTime, formatDateTime, trunca
 
             <TabsContent value="output" className="m-0">
               <div className="p-4 bg-muted/20 min-h-[100px] max-h-[400px] overflow-auto terminal-output">
-                {!stdout && status === 'running' ? (
+                {!stdout && !stderr && status === 'running' ? (
                   <span className="text-muted-foreground">Waiting for output...</span>
-                ) : !stdout ? (
+                ) : !stdout && !stderr ? (
                   <span className="text-muted-foreground">No output</span>
                 ) : (
-                  <pre className="whitespace-pre-wrap break-all">{stdout}</pre>
-                )}
-              </div>
-            </TabsContent>
-
-            <TabsContent value="stderr" className="m-0">
-              <div className="p-4 bg-muted/20 min-h-[100px] max-h-[400px] overflow-auto terminal-output">
-                {!stderr ? (
-                  <span className="text-muted-foreground">No stderr output</span>
-                ) : (
-                  <pre className="whitespace-pre-wrap break-all text-red-500 dark:text-red-400">{stderr}</pre>
+                  <pre className="whitespace-pre-wrap break-all">
+                    {stdout}
+                    {stderr && (
+                      <span className="text-red-500 dark:text-red-400">{stdout ? '\n' : ''}{stderr}</span>
+                    )}
+                  </pre>
                 )}
               </div>
             </TabsContent>
