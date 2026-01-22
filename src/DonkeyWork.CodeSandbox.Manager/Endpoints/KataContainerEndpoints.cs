@@ -297,7 +297,7 @@ public static class KataContainerEndpoints
         }
     }
 
-    private static async Task<Results<Ok<KataContainerInfo>, ServiceUnavailable, BadRequest<string>, ProblemHttpResult>> AllocateSandbox(
+    private static async Task<Results<Ok<KataContainerInfo>, StatusCodeHttpResult, BadRequest<string>, ProblemHttpResult>> AllocateSandbox(
         AllocateSandboxRequest request,
         IPoolManager poolManager,
         ILogger<Program> logger,
@@ -317,7 +317,7 @@ public static class KataContainerEndpoints
             if (container == null)
             {
                 logger.LogWarning("No warm sandboxes available for user: {UserId}", request.UserId);
-                return TypedResults.ServiceUnavailable();
+                return TypedResults.StatusCode(StatusCodes.Status503ServiceUnavailable);
             }
 
             logger.LogInformation("Successfully allocated sandbox {PodName} to user {UserId}",
