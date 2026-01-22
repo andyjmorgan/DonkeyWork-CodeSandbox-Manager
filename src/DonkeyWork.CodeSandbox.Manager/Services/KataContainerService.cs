@@ -66,11 +66,6 @@ public class KataContainerService : IKataContainerService
                 if (!isReady)
                 {
                     _logger.LogWarning("Pod {PodName} did not become ready within timeout", podName);
-
-                    // Clean up the failed pod
-                    await CleanupFailedPodAsync(podName, cancellationToken);
-
-                    throw new InvalidOperationException($"Pod {podName} failed to become ready");
                 }
 
                 // Fetch the latest pod state after waiting
@@ -178,20 +173,17 @@ public class KataContainerService : IKataContainerService
                             return;
                         }
 
-                        // Check if pod has failed or completed (Succeeded means container exited, which is a failure for a long-running service)
-                        if (currentPod.Status?.Phase == "Failed" || currentPod.Status?.Phase == "Succeeded")
+                        // Check if pod has failed
+                        if (currentPod.Status?.Phase == "Failed")
                         {
-                            _logger.LogWarning("Pod {PodName} terminated during startup with phase: {Phase}", podName, currentPod.Status?.Phase);
+                            _logger.LogWarning("Pod {PodName} failed during startup", podName);
 
                             writer.TryWrite(new ContainerFailedEvent
                             {
                                 PodName = podName,
-                                Reason = $"Pod terminated with phase: {currentPod.Status?.Phase}",
+                                Reason = "Pod failed during startup",
                                 ContainerInfo = MapPodToContainerInfo(currentPod)
                             });
-
-                            // Clean up the failed pod
-                            await CleanupFailedPodAsync(podName, cancellationToken);
 
                             return;
                         }
@@ -249,9 +241,6 @@ public class KataContainerService : IKataContainerService
                         ContainerInfo = null
                     });
                 }
-
-                // Clean up the failed pod
-                await CleanupFailedPodAsync(podName, cancellationToken);
             }
         }
         catch (Exception ex)
@@ -567,10 +556,10 @@ public class KataContainerService : IKataContainerService
                     return true;
                 }
 
-                // Check if pod has failed or completed (Succeeded means container exited, which is a failure for a long-running service)
-                if (pod.Status?.Phase == "Failed" || pod.Status?.Phase == "Succeeded")
+                // Check if pod has failed
+                if (pod.Status?.Phase == "Failed")
                 {
-                    _logger.LogWarning("Pod {PodName} terminated during startup with phase: {Phase}", podName, pod.Status?.Phase);
+                    _logger.LogWarning("Pod {PodName} failed during startup", podName);
                     return false;
                 }
 
