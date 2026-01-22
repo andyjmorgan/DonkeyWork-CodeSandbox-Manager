@@ -66,6 +66,11 @@ public class KataContainerService : IKataContainerService
                 if (!isReady)
                 {
                     _logger.LogWarning("Pod {PodName} did not become ready within timeout", podName);
+
+                    // Clean up the failed pod
+                    await CleanupFailedPodAsync(podName, cancellationToken);
+
+                    throw new InvalidOperationException($"Pod {podName} failed to become ready");
                 }
 
                 // Fetch the latest pod state after waiting
@@ -185,6 +190,9 @@ public class KataContainerService : IKataContainerService
                                 ContainerInfo = MapPodToContainerInfo(currentPod)
                             });
 
+                            // Clean up the failed pod
+                            await CleanupFailedPodAsync(podName, cancellationToken);
+
                             return;
                         }
 
@@ -241,6 +249,9 @@ public class KataContainerService : IKataContainerService
                         ContainerInfo = null
                     });
                 }
+
+                // Clean up the failed pod
+                await CleanupFailedPodAsync(podName, cancellationToken);
             }
         }
         catch (Exception ex)
@@ -272,7 +283,12 @@ public class KataContainerService : IKataContainerService
 
             var kataContainers = podList.Items
                 .Where(p => p.Spec.RuntimeClassName == _config.RuntimeClassName)
-                .Select(MapPodToContainerInfo)
+                .Select(p =>
+                {
+                    var info = MapPodToContainerInfo(p);
+                    info.LastActivity = _registry.GetLastActivity(p.Metadata.Name);
+                    return info;
+                })
                 .ToList();
 
             _logger.LogInformation("Found {Count} Kata containers", kataContainers.Count);
@@ -305,7 +321,9 @@ public class KataContainerService : IKataContainerService
                 return null;
             }
 
-            return MapPodToContainerInfo(pod);
+            var containerInfo = MapPodToContainerInfo(pod);
+            containerInfo.LastActivity = _registry.GetLastActivity(podName);
+            return containerInfo;
         }
         catch (k8s.Autorest.HttpOperationException ex) when (ex.Response.StatusCode == System.Net.HttpStatusCode.NotFound)
         {
@@ -659,5 +677,24 @@ public class KataContainerService : IKataContainerService
     {
         var lastActivity = _registry.GetLastActivity(sandboxId);
         return Task.FromResult(lastActivity);
+    }
+
+    private async Task CleanupFailedPodAsync(string podName, CancellationToken cancellationToken)
+    {
+        try
+        {
+            _logger.LogInformation("Cleaning up failed pod {PodName}", podName);
+            await _client.CoreV1.DeleteNamespacedPodAsync(
+                podName,
+                _config.TargetNamespace,
+                body: new V1DeleteOptions { GracePeriodSeconds = 0 },
+                cancellationToken: cancellationToken);
+            _registry.UnregisterContainer(podName);
+            _logger.LogInformation("Successfully cleaned up failed pod {PodName}", podName);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to clean up failed pod {PodName}", podName);
+        }
     }
 }
