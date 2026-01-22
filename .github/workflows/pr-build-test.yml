@@ -14,6 +14,11 @@ on:
       - '*.sln'
       - 'Directory.Packages.props'
 
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+
 env:
   DOTNET_VERSION: '10.0.x'
   DOTNET_SKIP_FIRST_TIME_EXPERIENCE: 1
