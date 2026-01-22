@@ -77,7 +77,7 @@ public class PoolBackfillService : BackgroundService
 
         try
         {
-            await leaderElector.RunAsync(stoppingToken);
+            await leaderElector.RunUntilLeadershipLostAsync(stoppingToken);
         }
         catch (OperationCanceledException)
         {
