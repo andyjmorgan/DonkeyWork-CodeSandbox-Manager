@@ -16,13 +16,17 @@ interface CommandExecutorProps {
 
 type ExecutionStatus = 'running' | 'completed' | 'error'
 
+interface OutputLine {
+  stream: 'stdout' | 'stderr'
+  data: string
+}
+
 interface CommandExecution {
   id: string
   command: string
   startedAt: Date
   status: ExecutionStatus
-  stdout: string
-  stderr: string
+  output: OutputLine[]
   exitCode: number | null
   timedOut: boolean
   rawMessages: string[]
@@ -40,8 +44,7 @@ export function CommandExecutor({ sandboxId, creationInfo, onDelete }: CommandEx
     command: 'Sandbox Created',
     startedAt: creationInfo.createdAt,
     status: 'completed',
-    stdout: '',
-    stderr: '',
+    output: [],
     exitCode: 0,
     timedOut: false,
     rawMessages: creationInfo.rawMessages,
@@ -70,8 +73,7 @@ export function CommandExecutor({ sandboxId, creationInfo, onDelete }: CommandEx
       command: `GET /api/kata/${sandboxId}`,
       startedAt: new Date(),
       status: 'running',
-      stdout: '',
-      stderr: '',
+      output: [],
       exitCode: null,
       timedOut: false,
       rawMessages: [],
@@ -93,8 +95,7 @@ export function CommandExecutor({ sandboxId, creationInfo, onDelete }: CommandEx
           ? {
               ...exec,
               status: response.ok ? 'completed' : 'error',
-              stdout: response.ok ? formattedJson : '',
-              stderr: !response.ok ? formattedJson : '',
+              output: [{ stream: response.ok ? 'stdout' : 'stderr', data: formattedJson }],
               exitCode: response.ok ? 0 : response.status,
               rawMessages: [formattedJson],
             }
@@ -106,7 +107,7 @@ export function CommandExecutor({ sandboxId, creationInfo, onDelete }: CommandEx
           ? {
               ...exec,
               status: 'error',
-              stderr: error instanceof Error ? error.message : 'Failed to query container',
+              output: [{ stream: 'stderr', data: error instanceof Error ? error.message : 'Failed to query container' }],
               exitCode: -1,
             }
           : exec
@@ -125,8 +126,7 @@ export function CommandExecutor({ sandboxId, creationInfo, onDelete }: CommandEx
       command: command.trim(),
       startedAt: new Date(),
       status: 'running',
-      stdout: '',
-      stderr: '',
+      output: [],
       exitCode: null,
       timedOut: false,
       rawMessages: [],
@@ -188,19 +188,12 @@ export function CommandExecutor({ sandboxId, creationInfo, onDelete }: CommandEx
               const event = JSON.parse(jsonStr) as ExecutionEvent
 
               if (event.$type === 'OutputEvent') {
-                if (event.stream === 'Stdout') {
-                  setExecutions(prev => prev.map(exec =>
-                    exec.id === executionId
-                      ? { ...exec, stdout: exec.stdout + (exec.stdout ? '\n' : '') + event.data }
-                      : exec
-                  ))
-                } else if (event.stream === 'Stderr') {
-                  setExecutions(prev => prev.map(exec =>
-                    exec.id === executionId
-                      ? { ...exec, stderr: exec.stderr + (exec.stderr ? '\n' : '') + event.data }
-                      : exec
-                  ))
-                }
+                const stream = event.stream === 'Stdout' ? 'stdout' : 'stderr'
+                setExecutions(prev => prev.map(exec =>
+                  exec.id === executionId
+                    ? { ...exec, output: [...exec.output, { stream, data: event.data }] }
+                    : exec
+                ))
               } else if (event.$type === 'CompletedEvent') {
                 setExecutions(prev => prev.map(exec =>
                   exec.id === executionId
@@ -220,7 +213,7 @@ export function CommandExecutor({ sandboxId, creationInfo, onDelete }: CommandEx
           ? {
               ...exec,
               status: 'error',
-              stderr: exec.stderr + (exec.stderr ? '\n' : '') + (error instanceof Error ? error.message : 'Failed to execute command')
+              output: [...exec.output, { stream: 'stderr', data: error instanceof Error ? error.message : 'Failed to execute command' }]
             }
           : exec
       ))
@@ -387,7 +380,7 @@ interface ExecutionCardProps {
 }
 
 function ExecutionCard({ execution, onToggle, formatTime, formatDateTime, truncateCommand }: ExecutionCardProps) {
-  const { command, startedAt, status, stdout, stderr, exitCode, timedOut, rawMessages, isExpanded, type, timeout, creationInfo } = execution
+  const { command, startedAt, status, output, exitCode, timedOut, rawMessages, isExpanded, type, timeout, creationInfo } = execution
 
   // Special rendering for creation type
   if (type === 'creation' && creationInfo) {
@@ -595,16 +588,20 @@ function ExecutionCard({ execution, onToggle, formatTime, formatDateTime, trunca
 
             <TabsContent value="output" className="m-0">
               <div className="p-4 bg-muted/20 min-h-[100px] max-h-[400px] overflow-auto terminal-output">
-                {!stdout && !stderr && status === 'running' ? (
+                {output.length === 0 && status === 'running' ? (
                   <span className="text-muted-foreground">Waiting for output...</span>
-                ) : !stdout && !stderr ? (
+                ) : output.length === 0 ? (
                   <span className="text-muted-foreground">No output</span>
                 ) : (
                   <pre className="whitespace-pre-wrap break-all">
-                    {stdout}
-                    {stderr && (
-                      <span className="text-red-500 dark:text-red-400">{stdout ? '\n' : ''}{stderr}</span>
-                    )}
+                    {output.map((line, idx) => (
+                      <span
+                        key={idx}
+                        className={line.stream === 'stderr' ? 'text-red-500 dark:text-red-400' : ''}
+                      >
+                        {idx > 0 ? '\n' : ''}{line.data}
+                      </span>
+                    ))}
                   </pre>
                 )}
               </div>
