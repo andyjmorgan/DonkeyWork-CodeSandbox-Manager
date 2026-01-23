@@ -19,6 +19,7 @@ public class PoolManager : IPoolManager
     private const string PoolStatusWarm = "warm";
     private const string PoolStatusAllocated = "allocated";
     private const string PoolStatusCreating = "creating";
+    internal const string PoolStatusManual = "manual";
     private const string AllocatedToLabel = "allocated-to";
     private const string ManagerIdLabel = "manager-id";
 
@@ -167,6 +168,42 @@ public class PoolManager : IPoolManager
         }
     }
 
+    public async Task<int> GetManualCountAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var manualPods = await _client.CoreV1.ListNamespacedPodAsync(
+                _config.TargetNamespace,
+                labelSelector: $"{PoolStatusLabel}={PoolStatusManual}",
+                cancellationToken: cancellationToken);
+
+            return manualPods.Items.Count;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to get manual count");
+            return 0;
+        }
+    }
+
+    public async Task<int> GetTotalContainerCountAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var allPods = await _client.CoreV1.ListNamespacedPodAsync(
+                _config.TargetNamespace,
+                cancellationToken: cancellationToken);
+
+            return allPods.Items
+                .Count(p => p.Spec.RuntimeClassName == _config.RuntimeClassName);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to get total container count");
+            return 0;
+        }
+    }
+
     public async Task<PoolStatistics> GetPoolStatisticsAsync(CancellationToken cancellationToken = default)
     {
         try
@@ -175,20 +212,24 @@ public class PoolManager : IPoolManager
             var creatingTask = GetCreatingCountAsync(cancellationToken);
             var warmTask = GetWarmPoolCountAsync(cancellationToken);
             var allocatedTask = GetAllocatedCountAsync(cancellationToken);
+            var manualTask = GetManualCountAsync(cancellationToken);
 
-            await Task.WhenAll(creatingTask, warmTask, allocatedTask);
+            await Task.WhenAll(creatingTask, warmTask, allocatedTask, manualTask);
 
             var creating = await creatingTask;
             var warm = await warmTask;
             var allocated = await allocatedTask;
-            var total = creating + warm + allocated;
+            var manual = await manualTask;
+            var total = creating + warm + allocated + manual;
 
             var readyPercentage = _config.WarmPoolSize > 0
                 ? (warm / (double)_config.WarmPoolSize) * 100.0
                 : 0.0;
 
+            // Utilization = (allocated + manual) / total
+            var activeContainers = allocated + manual;
             var utilizationPercentage = total > 0
-                ? (allocated / (double)total) * 100.0
+                ? (activeContainers / (double)total) * 100.0
                 : 0.0;
 
             return new PoolStatistics
@@ -196,8 +237,10 @@ public class PoolManager : IPoolManager
                 Creating = creating,
                 Warm = warm,
                 Allocated = allocated,
+                Manual = manual,
                 Total = total,
                 TargetSize = _config.WarmPoolSize,
+                MaxTotalContainers = _config.MaxTotalContainers,
                 ReadyPercentage = Math.Round(readyPercentage, 1),
                 UtilizationPercentage = Math.Round(utilizationPercentage, 1)
             };
@@ -210,8 +253,10 @@ public class PoolManager : IPoolManager
                 Creating = 0,
                 Warm = 0,
                 Allocated = 0,
+                Manual = 0,
                 Total = 0,
                 TargetSize = _config.WarmPoolSize,
+                MaxTotalContainers = _config.MaxTotalContainers,
                 ReadyPercentage = 0,
                 UtilizationPercentage = 0
             };
@@ -233,14 +278,19 @@ public class PoolManager : IPoolManager
                 labelSelector: $"{PoolStatusLabel}={PoolStatusWarm}",
                 cancellationToken: cancellationToken);
 
+            // Get total container count to enforce max limit
+            var totalContainers = await GetTotalContainerCountAsync(cancellationToken);
+
             var totalInPipeline = creatingPods.Items.Count + warmPods.Items.Count;
 
             _logger.LogInformation(
-                "Pool status: {Creating} creating, {Warm} warm, {Target} target, {Total} in pipeline",
+                "Pool status: {Creating} creating, {Warm} warm, {Target} target, {Total} in pipeline, {TotalContainers}/{MaxContainers} total",
                 creatingPods.Items.Count,
                 warmPods.Items.Count,
                 _config.WarmPoolSize,
-                totalInPipeline);
+                totalInPipeline,
+                totalContainers,
+                _config.MaxTotalContainers);
 
             if (totalInPipeline >= _config.WarmPoolSize)
             {
@@ -249,18 +299,36 @@ public class PoolManager : IPoolManager
             }
 
             var deficit = _config.WarmPoolSize - totalInPipeline;
-            _logger.LogInformation("Pool deficit: {Deficit}, creating new warm sandboxes", deficit);
+
+            // Respect max container limit - don't create more than allowed
+            var availableCapacity = _config.MaxTotalContainers - totalContainers;
+            if (availableCapacity <= 0)
+            {
+                _logger.LogWarning("Max container limit reached ({Max}), cannot backfill pool",
+                    _config.MaxTotalContainers);
+                return;
+            }
+
+            // Only create up to available capacity
+            var toCreate = Math.Min(deficit, availableCapacity);
+            if (toCreate < deficit)
+            {
+                _logger.LogWarning("Limiting backfill to {ToCreate} (requested {Deficit}) due to max container limit",
+                    toCreate, deficit);
+            }
+
+            _logger.LogInformation("Pool deficit: {Deficit}, creating {ToCreate} new warm sandboxes", deficit, toCreate);
 
             // Create pods to fill the deficit
             var tasks = new List<Task>();
-            for (int i = 0; i < deficit; i++)
+            for (int i = 0; i < toCreate; i++)
             {
                 tasks.Add(CreateWarmSandboxAsync(cancellationToken));
             }
 
             await Task.WhenAll(tasks);
 
-            _logger.LogInformation("Backfill completed, created {Count} new warm sandboxes", deficit);
+            _logger.LogInformation("Backfill completed, created {Count} new warm sandboxes", toCreate);
         }
         catch (Exception ex)
         {

@@ -17,11 +17,54 @@ A unified monorepo containing both the **Manager API** (Kata container orchestra
 ## Features
 
 - **Create Kata Containers**: Dynamically create VM-isolated containers with custom configuration
+- **Warm Pool Management**: Maintains a pool of pre-warmed containers for instant allocation
+- **High Availability**: Stateless managers with Kubernetes-native leader election
+- **Automatic Cleanup**: Idle and expired containers are automatically cleaned up
+- **Container Limits**: Configurable maximum container limit prevents resource exhaustion
 - **List Containers**: Retrieve all Kata containers with their status and metadata
 - **Get Container Details**: Fetch detailed information about a specific container
 - **Delete Containers**: Remove containers and terminate their associated VMs
 - **Health Checks**: Built-in health check endpoint for monitoring
 - **OpenAPI Documentation**: Interactive API documentation via Scalar
+
+## High Availability Architecture
+
+The CodeSandbox Manager is designed for high availability with **no external dependencies**:
+
+- **Stateless Managers**: Multiple manager instances can run simultaneously with no shared state
+- **Kubernetes as Source of Truth**: All container state (timestamps, allocation status) is stored as Kubernetes annotations and labels
+- **Leader Election**: Uses Kubernetes Lease objects for leader election - only the leader performs pool backfill operations
+- **Optimistic Locking**: Container allocation uses Kubernetes resourceVersion for conflict detection and automatic retry
+- **Distributed Monitoring**: All instances monitor and cleanup containers independently
+
+### Leader Election
+
+```mermaid
+flowchart TB
+    subgraph Managers["Manager Instances"]
+        M1["Manager 1<br/>(Leader)"]
+        M2["Manager 2<br/>(Follower)"]
+        M3["Manager 3<br/>(Follower)"]
+    end
+
+    subgraph K8s["Kubernetes"]
+        Lease["Lease Object<br/>pool-backfill-leader"]
+        Pods["Pod Resources<br/>(annotations/labels)"]
+    end
+
+    M1 -->|"Renews lease"| Lease
+    M1 -->|"Backfills pool"| Pods
+    M2 -.->|"Monitors lease"| Lease
+    M3 -.->|"Monitors lease"| Lease
+    M2 -->|"Allocates/Cleanup"| Pods
+    M3 -->|"Allocates/Cleanup"| Pods
+```
+
+**Key behaviors:**
+- Only the leader creates new warm pool containers (prevents duplicate creation)
+- All managers can allocate containers and handle cleanup (distributed workload)
+- If the leader fails, another manager automatically takes over within 15 seconds
+- State survives manager restarts - Kubernetes annotations are the source of truth
 
 ## Architecture
 
@@ -192,20 +235,32 @@ The service is configured via `appsettings.json`:
     },
     "PodNamePrefix": "kata-sandbox",
     "CleanupCompletedPods": true,
-    "PodReadyTimeoutSeconds": 90
+    "PodReadyTimeoutSeconds": 90,
+    "IdleTimeoutMinutes": 5,
+    "MaxContainerLifetimeMinutes": 15,
+    "MaxTotalContainers": 50,
+    "WarmPoolSize": 10,
+    "PoolBackfillCheckIntervalSeconds": 30,
+    "LeaderLeaseDurationSeconds": 15
   }
 }
 ```
 
 ### Configuration Options
 
-- `TargetNamespace`: Kubernetes namespace where containers will be created
-- `RuntimeClassName`: Runtime class for Kata isolation (must be "kata-qemu")
-- `DefaultResourceRequests`: Default CPU and memory requests
-- `DefaultResourceLimits`: Default CPU and memory limits
-- `PodNamePrefix`: Prefix for generated pod names
-- `CleanupCompletedPods`: Whether to automatically clean up completed pods
-- `PodReadyTimeoutSeconds`: Timeout for waiting for pods to become ready (30-300 seconds)
+| Option | Default | Range | Description |
+|--------|---------|-------|-------------|
+| `TargetNamespace` | `sandbox-containers` | - | Kubernetes namespace for containers |
+| `RuntimeClassName` | `kata-qemu` | - | Runtime class for Kata isolation |
+| `PodNamePrefix` | `kata-sandbox` | - | Prefix for generated pod names |
+| `PodReadyTimeoutSeconds` | `90` | 30-300 | Timeout waiting for pods to become ready |
+| `IdleTimeoutMinutes` | `5` | 1-1440 | Delete allocated containers after this idle time |
+| `MaxContainerLifetimeMinutes` | `15` | 1-1440 | Maximum lifetime for any allocated container |
+| `MaxTotalContainers` | `50` | 1-500 | Maximum total containers (warm + allocated + manual) |
+| `WarmPoolSize` | `10` | 0-100 | Target number of pre-warmed containers |
+| `PoolBackfillCheckIntervalSeconds` | `30` | 10-300 | How often to check and backfill the pool |
+| `LeaderLeaseDurationSeconds` | `15` | 5-60 | Leader election lease duration |
+| `CleanupCheckIntervalMinutes` | `1` | 1-60 | How often to check for idle/expired containers |
 
 ## API Endpoints
 

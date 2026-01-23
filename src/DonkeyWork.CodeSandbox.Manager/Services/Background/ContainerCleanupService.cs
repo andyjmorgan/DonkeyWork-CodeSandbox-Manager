@@ -57,15 +57,23 @@ public class ContainerCleanupService : BackgroundService
 
     private async Task CleanupContainersAsync(CancellationToken cancellationToken)
     {
-        // Only clean up allocated containers (not warm pool)
+        // Clean up allocated containers (from pool)
         var allocatedPods = await _client.CoreV1.ListNamespacedPodAsync(
             _config.TargetNamespace,
             labelSelector: "pool-status=allocated",
             cancellationToken: cancellationToken);
 
-        if (!allocatedPods.Items.Any())
+        // Also clean up manually created containers
+        var manualPods = await _client.CoreV1.ListNamespacedPodAsync(
+            _config.TargetNamespace,
+            labelSelector: "pool-status=manual",
+            cancellationToken: cancellationToken);
+
+        var allActiveContainers = allocatedPods.Items.Concat(manualPods.Items).ToList();
+
+        if (!allActiveContainers.Any())
         {
-            _logger.LogDebug("No allocated containers to check for cleanup");
+            _logger.LogDebug("No active containers to check for cleanup");
             return;
         }
 
@@ -76,7 +84,7 @@ public class ContainerCleanupService : BackgroundService
         var idleContainers = new List<V1Pod>();
         var expiredContainers = new List<V1Pod>();
 
-        foreach (var pod in allocatedPods.Items)
+        foreach (var pod in allActiveContainers)
         {
             // Use allocation time for max lifetime checks (not creation time)
             var allocatedAt = PoolManager.ParseTimestampAnnotation(
@@ -111,8 +119,8 @@ public class ContainerCleanupService : BackgroundService
 
         // Log status
         _logger.LogInformation(
-            "Container cleanup check: {Total} allocated, {Expired} expired, {Idle} idle",
-            allocatedPods.Items.Count, expiredContainers.Count, idleContainers.Count);
+            "Container cleanup check: {Allocated} allocated, {Manual} manual, {Expired} expired, {Idle} idle",
+            allocatedPods.Items.Count, manualPods.Items.Count, expiredContainers.Count, idleContainers.Count);
 
         // Delete expired containers first (hard limit)
         foreach (var pod in expiredContainers)

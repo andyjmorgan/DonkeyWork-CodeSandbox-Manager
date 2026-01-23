@@ -1,4 +1,4 @@
-import { TrendingUp, Activity } from 'lucide-react'
+import { TrendingUp, Activity, Server } from 'lucide-react'
 import type { PoolStatusResponse } from '@/types/api'
 
 interface PoolChartProps {
@@ -6,13 +6,16 @@ interface PoolChartProps {
 }
 
 export function PoolChart({ poolStatus }: PoolChartProps) {
-  const { creating, warm, allocated, targetSize, readyPercentage, utilizationPercentage } = poolStatus
+  const { creating, warm, allocated, manual, total, targetSize, maxTotalContainers, readyPercentage, utilizationPercentage } = poolStatus
 
   // Calculate percentages for visual display
-  const total = creating + warm + allocated
   const creatingPercent = total > 0 ? (creating / total) * 100 : 0
   const warmPercent = total > 0 ? (warm / total) * 100 : 0
   const allocatedPercent = total > 0 ? (allocated / total) * 100 : 0
+  const manualPercent = total > 0 ? (manual / total) * 100 : 0
+
+  // Active containers = allocated + manual
+  const activeContainers = allocated + manual
 
   return (
     <div className="space-y-4">
@@ -21,7 +24,7 @@ export function PoolChart({ poolStatus }: PoolChartProps) {
         <div className="flex items-center justify-between mb-2">
           <span className="text-sm font-medium">Pool Composition</span>
           <span className="text-xs text-muted-foreground">
-            {total} total
+            {total} / {maxTotalContainers} max
           </span>
         </div>
         <div className="h-8 w-full bg-muted rounded-lg overflow-hidden flex">
@@ -52,9 +55,18 @@ export function PoolChart({ poolStatus }: PoolChartProps) {
               {allocated > 0 && allocatedPercent > 10 && allocated}
             </div>
           )}
+          {manual > 0 && (
+            <div
+              className="bg-purple-500 dark:bg-purple-600 transition-all duration-300 flex items-center justify-center text-xs font-semibold text-white"
+              style={{ width: `${manualPercent}%` }}
+              title={`${manual} manual (${manualPercent.toFixed(1)}%)`}
+            >
+              {manual > 0 && manualPercent > 10 && manual}
+            </div>
+          )}
         </div>
         <div className="flex items-center justify-between mt-2 text-xs">
-          <div className="flex gap-3">
+          <div className="flex flex-wrap gap-3">
             {creating > 0 && (
               <div className="flex items-center gap-1">
                 <div className="w-3 h-3 rounded bg-yellow-500 dark:bg-yellow-600"></div>
@@ -67,14 +79,20 @@ export function PoolChart({ poolStatus }: PoolChartProps) {
             </div>
             <div className="flex items-center gap-1">
               <div className="w-3 h-3 rounded bg-blue-500 dark:bg-blue-600"></div>
-              <span className="text-muted-foreground">In Use ({allocated})</span>
+              <span className="text-muted-foreground">Allocated ({allocated})</span>
             </div>
+            {manual > 0 && (
+              <div className="flex items-center gap-1">
+                <div className="w-3 h-3 rounded bg-purple-500 dark:bg-purple-600"></div>
+                <span className="text-muted-foreground">Manual ({manual})</span>
+              </div>
+            )}
           </div>
         </div>
       </div>
 
       {/* Stats Grid */}
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-3 gap-3">
         <div className="border border-border rounded-lg p-3 bg-gradient-to-br from-green-50 to-green-100 dark:from-green-950 dark:to-green-900">
           <div className="flex items-center gap-2 mb-1">
             <Activity className="h-4 w-4 text-green-600 dark:text-green-400" />
@@ -97,7 +115,20 @@ export function PoolChart({ poolStatus }: PoolChartProps) {
             {utilizationPercentage.toFixed(0)}%
           </div>
           <div className="text-xs text-muted-foreground mt-1">
-            {allocated} of {total} active
+            {activeContainers} of {total} active
+          </div>
+        </div>
+
+        <div className="border border-border rounded-lg p-3 bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800">
+          <div className="flex items-center gap-2 mb-1">
+            <Server className="h-4 w-4 text-gray-600 dark:text-gray-400" />
+            <span className="text-xs text-muted-foreground">Capacity</span>
+          </div>
+          <div className="text-2xl font-bold text-gray-700 dark:text-gray-300">
+            {((total / maxTotalContainers) * 100).toFixed(0)}%
+          </div>
+          <div className="text-xs text-muted-foreground mt-1">
+            {total} of {maxTotalContainers} max
           </div>
         </div>
       </div>

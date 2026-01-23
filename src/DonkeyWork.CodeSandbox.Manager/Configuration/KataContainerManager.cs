@@ -31,15 +31,18 @@ public class KataContainerManager
     public int PodReadyTimeoutSeconds { get; set; } = 90;
 
     [Range(1, 1440, ErrorMessage = "Idle timeout must be between 1 and 1440 minutes")]
-    public int IdleTimeoutMinutes { get; set; } = 15;
+    public int IdleTimeoutMinutes { get; set; } = 5;
 
     [Range(1, 60, ErrorMessage = "Cleanup check interval must be between 1 and 60 minutes")]
     public int CleanupCheckIntervalMinutes { get; set; } = 1;
 
     [Range(1, 1440, ErrorMessage = "Maximum container lifetime must be between 1 and 1440 minutes")]
-    public int MaxContainerLifetimeMinutes { get; set; } = 60;
+    public int MaxContainerLifetimeMinutes { get; set; } = 15;
 
     // Pool management settings
+    [Range(1, 500, ErrorMessage = "Max total containers must be between 1 and 500")]
+    public int MaxTotalContainers { get; set; } = 50;
+
     [Range(0, 100, ErrorMessage = "Warm pool size must be between 0 and 100")]
     public int WarmPoolSize { get; set; } = 10;
 

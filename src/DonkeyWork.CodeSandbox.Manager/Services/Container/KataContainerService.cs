@@ -36,6 +36,16 @@ public class KataContainerService : IKataContainerService
         _logger.LogInformation("Creating Kata container with image: {Image}, WaitForReady: {WaitForReady}",
             _config.DefaultImage, request.WaitForReady);
 
+        // Check container limit before creating
+        var currentCount = await GetTotalContainerCountAsync(cancellationToken);
+        if (currentCount >= _config.MaxTotalContainers)
+        {
+            _logger.LogWarning("Container limit reached: {Current}/{Max}",
+                currentCount, _config.MaxTotalContainers);
+            throw new InvalidOperationException(
+                $"Maximum container limit of {_config.MaxTotalContainers} reached. Current: {currentCount}");
+        }
+
         var uniqueId = Guid.NewGuid().ToString("N")[..8];
         var podName = $"{_config.PodNamePrefix}-{uniqueId}";
 
@@ -106,6 +116,22 @@ public class KataContainerService : IKataContainerService
         CancellationToken cancellationToken)
     {
         _logger.LogInformation("Creating Kata container with image: {Image} (streaming mode)", _config.DefaultImage);
+
+        // Check container limit before creating
+        var currentCount = await GetTotalContainerCountAsync(cancellationToken);
+        if (currentCount >= _config.MaxTotalContainers)
+        {
+            _logger.LogWarning("Container limit reached: {Current}/{Max}",
+                currentCount, _config.MaxTotalContainers);
+            writer.TryWrite(new ContainerFailedEvent
+            {
+                PodName = "N/A",
+                Reason = $"Maximum container limit of {_config.MaxTotalContainers} reached. Current: {currentCount}",
+                ContainerInfo = null
+            });
+            writer.Complete();
+            return;
+        }
 
         var uniqueId = Guid.NewGuid().ToString("N")[..8];
         var podName = $"{_config.PodNamePrefix}-{uniqueId}";
@@ -426,14 +452,34 @@ public class KataContainerService : IKataContainerService
         return response;
     }
 
+    private async Task<int> GetTotalContainerCountAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var allPods = await _client.CoreV1.ListNamespacedPodAsync(
+                _config.TargetNamespace,
+                cancellationToken: cancellationToken);
+
+            return allPods.Items
+                .Count(p => p.Spec.RuntimeClassName == _config.RuntimeClassName);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to get total container count");
+            return 0;
+        }
+    }
+
     private V1Pod BuildPodSpec(string podName, CreateContainerRequest request)
     {
+        var nowTimestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString();
+
         var labels = new Dictionary<string, string>
         {
             ["app"] = "kata-manager",
             ["runtime"] = "kata",
             ["managed-by"] = "CodeSandbox-Manager",
-            ["created-at"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString()
+            ["pool-status"] = PoolManager.PoolStatusManual  // Mark as manually created
         };
 
         if (request.Labels != null)
@@ -443,6 +489,14 @@ public class KataContainerService : IKataContainerService
                 labels[kvp.Key] = kvp.Value;
             }
         }
+
+        // Annotations for timestamps (source of truth)
+        var annotations = new Dictionary<string, string>
+        {
+            [PoolManager.CreatedAtAnnotation] = nowTimestamp,
+            [PoolManager.AllocatedAtAnnotation] = nowTimestamp,  // Manual containers are immediately "allocated"
+            [PoolManager.LastActivityAnnotation] = nowTimestamp
+        };
 
         var container = new V1Container
         {
@@ -467,7 +521,8 @@ public class KataContainerService : IKataContainerService
             {
                 Name = podName,
                 NamespaceProperty = _config.TargetNamespace,
-                Labels = labels
+                Labels = labels,
+                Annotations = annotations
             },
             Spec = new V1PodSpec
             {

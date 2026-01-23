@@ -21,14 +21,24 @@ public class PoolStatistics
     public int Allocated { get; init; }
 
     /// <summary>
-    /// Total number of sandboxes in the pool (creating + warm + allocated).
+    /// Number of sandboxes created manually (via POST /api/kata).
+    /// </summary>
+    public int Manual { get; init; }
+
+    /// <summary>
+    /// Total number of sandboxes in the pool (creating + warm + allocated + manual).
     /// </summary>
     public int Total { get; init; }
 
     /// <summary>
-    /// Target pool size configured.
+    /// Target warm pool size configured.
     /// </summary>
     public int TargetSize { get; init; }
+
+    /// <summary>
+    /// Maximum total containers allowed (warm + allocated + manual).
+    /// </summary>
+    public int MaxTotalContainers { get; init; }
 
     /// <summary>
     /// Percentage of pool that is ready (warm / targetSize * 100).
