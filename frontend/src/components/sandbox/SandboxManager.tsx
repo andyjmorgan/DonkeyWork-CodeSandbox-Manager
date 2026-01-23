@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { SandboxCreator, type CreationInfo } from './SandboxCreator'
 import { CommandExecutor } from './CommandExecutor'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { X, Terminal, Plus } from 'lucide-react'
+import { X, Terminal, LayoutDashboard } from 'lucide-react'
 
 interface Sandbox {
   id: string
@@ -46,8 +46,8 @@ export function SandboxManager() {
               value="create"
               className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-background px-3 sm:px-4 py-2"
             >
-              <Plus className="h-4 w-4 sm:mr-1" />
-              <span className="hidden sm:inline">New</span>
+              <LayoutDashboard className="h-4 w-4 sm:mr-1" />
+              <span className="hidden sm:inline">Dashboard</span>
             </TabsTrigger>
             {sandboxes.map(sandbox => (
               <TabsTrigger

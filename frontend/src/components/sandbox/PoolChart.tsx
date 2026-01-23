@@ -21,7 +21,7 @@ export function PoolChart({ poolStatus }: PoolChartProps) {
         <div className="flex items-center justify-between mb-2">
           <span className="text-sm font-medium">Pool Composition</span>
           <span className="text-xs text-muted-foreground">
-            {total} / {targetSize} total
+            {total} total
           </span>
         </div>
         <div className="h-8 w-full bg-muted rounded-lg overflow-hidden flex">

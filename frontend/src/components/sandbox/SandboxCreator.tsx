@@ -2,7 +2,8 @@ import { useState, useCallback, useRef, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Plus, Loader2, CheckCircle, XCircle, Box, Terminal, Zap, Shield, Gauge } from 'lucide-react'
+import { Plus, Loader2, CheckCircle, XCircle, Box, Terminal, Zap, Shield, Gauge, ChevronDown, Trash2, AlertTriangle, Eye, EyeOff } from 'lucide-react'
+import { Input } from '@/components/ui/input'
 import type { ContainerEvent, ContainerReadyEvent, KataContainerInfo, PoolStatusResponse } from '@/types/api'
 import { PoolChart } from './PoolChart'
 
@@ -44,7 +45,15 @@ export function SandboxCreator({ onSandboxCreated }: SandboxCreatorProps) {
   })
 
   const [poolStatus, setPoolStatus] = useState<PoolStatusResponse | null>(null)
-  const [useAdvancedCreate, setUseAdvancedCreate] = useState(false)
+  const [advancedOpen, setAdvancedOpen] = useState(false)
+  const [apiKey, setApiKey] = useState('')
+  const [showApiKey, setShowApiKey] = useState(false)
+  const [deleteStatus, setDeleteStatus] = useState<{
+    status: 'idle' | 'deleting' | 'success' | 'error'
+    message: string
+    deletedCount?: number
+    failedCount?: number
+  }>({ status: 'idle', message: '' })
 
   // Ref to track if callback has been called for current creation
   const callbackCalledRef = useRef(false)
@@ -291,6 +300,47 @@ export function SandboxCreator({ onSandboxCreated }: SandboxCreatorProps) {
     })
   }
 
+  const deleteAllContainers = async () => {
+    if (!apiKey.trim()) {
+      setDeleteStatus({
+        status: 'error',
+        message: 'API key is required',
+      })
+      return
+    }
+
+    setDeleteStatus({ status: 'deleting', message: 'Deleting all containers...' })
+
+    try {
+      const response = await fetch('/api/kata', {
+        method: 'DELETE',
+        headers: {
+          'X-Api-Key': apiKey,
+        },
+      })
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          throw new Error('Invalid API key')
+        }
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+
+      const result = await response.json()
+      setDeleteStatus({
+        status: 'success',
+        message: `Deleted ${result.deletedCount} container(s)`,
+        deletedCount: result.deletedCount,
+        failedCount: result.failedCount,
+      })
+    } catch (error) {
+      setDeleteStatus({
+        status: 'error',
+        message: error instanceof Error ? error.message : 'Failed to delete containers',
+      })
+    }
+  }
+
   return (
     <div className="space-y-6">
       {/* Hero Section */}
@@ -397,15 +447,10 @@ export function SandboxCreator({ onSandboxCreated }: SandboxCreatorProps) {
       <div className="border border-border rounded-lg p-4 bg-card">
         <div className={`flex items-center justify-between ${state.status !== 'idle' ? 'mb-4' : ''}`}>
           <div>
-            <h3 className="text-lg font-semibold">
-              {useAdvancedCreate ? 'Create New Sandbox' : 'Get Instant Sandbox'}
-            </h3>
+            <h3 className="text-lg font-semibold">Get a Sandbox</h3>
             {state.status === 'idle' && (
               <p className="text-sm text-muted-foreground mt-1">
-                {useAdvancedCreate
-                  ? 'Create from scratch with streaming progress'
-                  : 'Allocate from warm pool (instant)'
-                }
+                Allocate from warm pool or create a new one
               </p>
             )}
           </div>
@@ -414,17 +459,18 @@ export function SandboxCreator({ onSandboxCreated }: SandboxCreatorProps) {
               <>
                 <Button
                   variant="outline"
-                  size="sm"
-                  onClick={() => setUseAdvancedCreate(!useAdvancedCreate)}
-                >
-                  {useAdvancedCreate ? '⚡ Quick Mode' : '🔧 Advanced'}
-                </Button>
-                <Button
-                  onClick={useAdvancedCreate ? createSandbox : allocateSandbox}
+                  onClick={createSandbox}
                   size="lg"
                 >
                   <Plus className="h-4 w-4 mr-2" />
-                  {useAdvancedCreate ? 'Create' : 'Allocate'}
+                  Create
+                </Button>
+                <Button
+                  onClick={allocateSandbox}
+                  size="lg"
+                >
+                  <Zap className="h-4 w-4 mr-2" />
+                  Allocate
                 </Button>
               </>
             )}
@@ -515,6 +561,104 @@ export function SandboxCreator({ onSandboxCreated }: SandboxCreatorProps) {
           </div>
         )}
       </div>
+
+      {/* Advanced Section - Collapsible */}
+      {state.status === 'idle' && (
+        <div className="border border-border rounded-lg bg-card">
+          <button
+            onClick={() => setAdvancedOpen(!advancedOpen)}
+            className="w-full flex items-center justify-between p-4 text-left hover:bg-muted/50 transition-colors"
+          >
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 text-orange-500" />
+              <span className="font-semibold">Advanced</span>
+            </div>
+            <ChevronDown className={`h-4 w-4 transition-transform ${advancedOpen ? 'rotate-180' : ''}`} />
+          </button>
+
+          {advancedOpen && (
+            <div className="px-4 pb-4 border-t border-border pt-4">
+              <div className="space-y-4">
+                <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-4">
+                  <div className="flex items-start gap-3">
+                    <Trash2 className="h-5 w-5 text-destructive mt-0.5" />
+                    <div className="flex-1">
+                      <h4 className="font-semibold text-destructive">Delete All Containers</h4>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        This will delete all sandbox containers in the namespace. This action cannot be undone.
+                      </p>
+
+                      <div className="mt-4 space-y-3">
+                        <div>
+                          <label htmlFor="apiKey" className="text-sm font-medium">
+                            API Key <span className="text-destructive">*</span>
+                          </label>
+                          <div className="relative mt-1">
+                            <Input
+                              id="apiKey"
+                              type={showApiKey ? 'text' : 'password'}
+                              placeholder="Enter API key to authorize"
+                              value={apiKey}
+                              onChange={(e) => setApiKey(e.target.value)}
+                              className="pr-10"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setShowApiKey(!showApiKey)}
+                              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                            >
+                              {showApiKey ? (
+                                <EyeOff className="h-4 w-4" />
+                              ) : (
+                                <Eye className="h-4 w-4" />
+                              )}
+                            </button>
+                          </div>
+                        </div>
+
+                        <Button
+                          variant="destructive"
+                          onClick={deleteAllContainers}
+                          disabled={deleteStatus.status === 'deleting' || !apiKey.trim()}
+                        >
+                          {deleteStatus.status === 'deleting' ? (
+                            <>
+                              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                              Deleting...
+                            </>
+                          ) : (
+                            <>
+                              <Trash2 className="h-4 w-4 mr-2" />
+                              Delete All Containers
+                            </>
+                          )}
+                        </Button>
+
+                        {deleteStatus.status === 'success' && (
+                          <div className="flex items-center gap-2 text-green-600 dark:text-green-400 text-sm">
+                            <CheckCircle className="h-4 w-4" />
+                            <span>{deleteStatus.message}</span>
+                            {deleteStatus.failedCount && deleteStatus.failedCount > 0 && (
+                              <span className="text-orange-500">({deleteStatus.failedCount} failed)</span>
+                            )}
+                          </div>
+                        )}
+
+                        {deleteStatus.status === 'error' && (
+                          <div className="flex items-center gap-2 text-destructive text-sm">
+                            <XCircle className="h-4 w-4" />
+                            <span>{deleteStatus.message}</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
