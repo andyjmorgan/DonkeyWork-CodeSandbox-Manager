@@ -445,7 +445,7 @@ export function SandboxCreator({ onSandboxCreated }: SandboxCreatorProps) {
 
       {/* Create Button - Always visible at top */}
       <div className="border border-border rounded-lg p-4 bg-card">
-        <div className={`flex items-center justify-between ${state.status !== 'idle' ? 'mb-4' : ''}`}>
+        <div className={`flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 ${state.status !== 'idle' ? 'mb-4' : ''}`}>
           <div>
             <h3 className="text-lg font-semibold">Get a Sandbox</h3>
             {state.status === 'idle' && (
@@ -454,13 +454,14 @@ export function SandboxCreator({ onSandboxCreated }: SandboxCreatorProps) {
               </p>
             )}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
             {state.status === 'idle' && (
               <>
                 <Button
                   variant="outline"
                   onClick={createSandbox}
                   size="lg"
+                  className="w-full sm:w-auto"
                 >
                   <Plus className="h-4 w-4 mr-2" />
                   Create
@@ -468,6 +469,7 @@ export function SandboxCreator({ onSandboxCreated }: SandboxCreatorProps) {
                 <Button
                   onClick={allocateSandbox}
                   size="lg"
+                  className="w-full sm:w-auto"
                 >
                   <Zap className="h-4 w-4 mr-2" />
                   Allocate
