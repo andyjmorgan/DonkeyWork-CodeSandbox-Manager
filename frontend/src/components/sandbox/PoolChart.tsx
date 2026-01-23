@@ -6,7 +6,17 @@ interface PoolChartProps {
 }
 
 export function PoolChart({ poolStatus }: PoolChartProps) {
-  const { creating, warm, allocated, manual, total, targetSize, maxTotalContainers, readyPercentage, utilizationPercentage } = poolStatus
+  const {
+    creating,
+    warm,
+    allocated,
+    manual = 0,
+    total,
+    targetSize,
+    maxTotalContainers = 50,
+    readyPercentage,
+    utilizationPercentage
+  } = poolStatus
 
   // Calculate percentages for visual display
   const creatingPercent = total > 0 ? (creating / total) * 100 : 0
