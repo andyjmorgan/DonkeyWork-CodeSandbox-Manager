@@ -18,6 +18,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DonkeyWork.CodeSandbox.Serv
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DonkeyWork.CodeSandbox.McpServer", "src\DonkeyWork.CodeSandbox.McpServer\DonkeyWork.CodeSandbox.McpServer.csproj", "{B1F2E3D4-5A6B-7C8D-9E0F-1A2B3C4D5E6F}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DonkeyWork.CodeSandbox.McpServer.IntegrationTests", "test\DonkeyWork.CodeSandbox.McpServer.IntegrationTests\DonkeyWork.CodeSandbox.McpServer.IntegrationTests.csproj", "{D2E3F4A5-6B7C-8D9E-0F1A-2B3C4D5E6F7A}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -112,6 +114,18 @@ Global
 		{B1F2E3D4-5A6B-7C8D-9E0F-1A2B3C4D5E6F}.Release|x64.Build.0 = Release|Any CPU
 		{B1F2E3D4-5A6B-7C8D-9E0F-1A2B3C4D5E6F}.Release|x86.ActiveCfg = Release|Any CPU
 		{B1F2E3D4-5A6B-7C8D-9E0F-1A2B3C4D5E6F}.Release|x86.Build.0 = Release|Any CPU
+		{D2E3F4A5-6B7C-8D9E-0F1A-2B3C4D5E6F7A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D2E3F4A5-6B7C-8D9E-0F1A-2B3C4D5E6F7A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D2E3F4A5-6B7C-8D9E-0F1A-2B3C4D5E6F7A}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{D2E3F4A5-6B7C-8D9E-0F1A-2B3C4D5E6F7A}.Debug|x64.Build.0 = Debug|Any CPU
+		{D2E3F4A5-6B7C-8D9E-0F1A-2B3C4D5E6F7A}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{D2E3F4A5-6B7C-8D9E-0F1A-2B3C4D5E6F7A}.Debug|x86.Build.0 = Debug|Any CPU
+		{D2E3F4A5-6B7C-8D9E-0F1A-2B3C4D5E6F7A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D2E3F4A5-6B7C-8D9E-0F1A-2B3C4D5E6F7A}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D2E3F4A5-6B7C-8D9E-0F1A-2B3C4D5E6F7A}.Release|x64.ActiveCfg = Release|Any CPU
+		{D2E3F4A5-6B7C-8D9E-0F1A-2B3C4D5E6F7A}.Release|x64.Build.0 = Release|Any CPU
+		{D2E3F4A5-6B7C-8D9E-0F1A-2B3C4D5E6F7A}.Release|x86.ActiveCfg = Release|Any CPU
+		{D2E3F4A5-6B7C-8D9E-0F1A-2B3C4D5E6F7A}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -124,5 +138,6 @@ Global
 		{C2BEFA65-5306-468A-B137-3E4F1C3C05DB} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{60647C45-AAAF-410D-91BF-0414803E8B58} = {E8B1F4C1-9A2B-4E3D-8F7A-1D3C5E6F7A8B}
 		{B1F2E3D4-5A6B-7C8D-9E0F-1A2B3C4D5E6F} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{D2E3F4A5-6B7C-8D9E-0F1A-2B3C4D5E6F7A} = {E8B1F4C1-9A2B-4E3D-8F7A-1D3C5E6F7A8B}
 	EndGlobalSection
 EndGlobal
