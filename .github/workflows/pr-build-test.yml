@@ -122,6 +122,9 @@ jobs:
           - name: executor
             dockerfile: ./src/DonkeyWork.CodeSandbox.Server/Dockerfile
             context: .
+          - name: mcp-server
+            dockerfile: ./src/DonkeyWork.CodeSandbox.McpServer/Dockerfile
+            context: .
           - name: frontend
             dockerfile: ./frontend/Dockerfile
             context: ./frontend
