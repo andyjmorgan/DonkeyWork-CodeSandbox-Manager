@@ -212,7 +212,7 @@ public class TerminalService : ITerminalService
                     {
                         if (controlType == "resize" && payload != null)
                         {
-                            await SendResizeToK8sAsync(k8sWebSocket, payload, cancellationToken);
+                            await SendResizeToK8sAsync(k8sWebSocket, payload.Value, cancellationToken);
                             continue;
                         }
                     }
