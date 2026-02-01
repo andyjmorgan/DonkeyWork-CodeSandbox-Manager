@@ -29,7 +29,7 @@ env:
 jobs:
   build-and-test:
     name: Build and Test
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
 
     steps:
       - name: Checkout code
@@ -77,7 +77,7 @@ jobs:
 
   frontend-build:
     name: Frontend Build and Lint
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
 
     steps:
       - name: Checkout code
@@ -111,7 +111,7 @@ jobs:
 
   docker-build:
     name: Docker Build (Validation)
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: [build-and-test, frontend-build]
     strategy:
       matrix:
@@ -149,7 +149,7 @@ jobs:
 
   lint-and-security:
     name: Lint and Security Scan
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
 
     steps:
       - name: Checkout code
@@ -172,7 +172,7 @@ jobs:
 
   pr-status:
     name: PR Status
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: [build-and-test, frontend-build, docker-build, lint-and-security]
     if: always()
 

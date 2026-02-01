@@ -31,7 +31,7 @@ permissions:
 jobs:
   build-and-test:
     name: Build and Test
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
 
     steps:
       - name: Checkout code
@@ -70,7 +70,7 @@ jobs:
 
   frontend-build:
     name: Frontend Build and Lint
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
 
     steps:
       - name: Checkout code
@@ -97,7 +97,7 @@ jobs:
 
   semantic-version:
     name: Determine Version
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: [build-and-test, frontend-build]
     outputs:
       version: ${{ steps.semver.outputs.version }}
@@ -129,7 +129,7 @@ jobs:
 
   detect-changes:
     name: Detect Changes
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     outputs:
       manager: ${{ steps.filter.outputs.manager }}
       executor: ${{ steps.filter.outputs.executor }}
@@ -169,7 +169,7 @@ jobs:
 
   docker-build-manager:
     name: Build and Push Manager
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: [build-and-test, semantic-version, detect-changes]
     if: needs.detect-changes.outputs.manager == 'true'
     outputs:
@@ -234,7 +234,7 @@ jobs:
 
   docker-build-executor:
     name: Build and Push Executor
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: [build-and-test, semantic-version, detect-changes]
     if: needs.detect-changes.outputs.executor == 'true'
     outputs:
@@ -299,7 +299,7 @@ jobs:
 
   docker-build-frontend:
     name: Build and Push Frontend
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: [frontend-build, semantic-version, detect-changes]
     if: needs.detect-changes.outputs.frontend == 'true'
     outputs:
@@ -364,7 +364,7 @@ jobs:
 
   create-release:
     name: Create GitHub Release
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: [semantic-version, detect-changes, docker-build-manager, docker-build-executor, docker-build-frontend]
     if: always() && needs.semantic-version.result == 'success' && (needs.docker-build-manager.result == 'success' || needs.docker-build-manager.result == 'skipped') && (needs.docker-build-executor.result == 'success' || needs.docker-build-executor.result == 'skipped') && (needs.docker-build-frontend.result == 'success' || needs.docker-build-frontend.result == 'skipped')
 
@@ -432,7 +432,7 @@ jobs:
 
   release-summary:
     name: Release Summary
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: [semantic-version, detect-changes, docker-build-manager, docker-build-executor, docker-build-frontend, create-release]
     if: always()
 
