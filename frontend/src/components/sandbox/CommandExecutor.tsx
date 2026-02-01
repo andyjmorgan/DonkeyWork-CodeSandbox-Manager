@@ -3,9 +3,10 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Play, Loader2, Terminal, Trash2, ChevronDown, ChevronRight, Search } from 'lucide-react'
+import { Play, Loader2, Terminal as TerminalIcon, Trash2, ChevronDown, ChevronRight, Search, SquareTerminal, Code } from 'lucide-react'
 import type { ExecutionEvent } from '@/types/api'
 import type { CreationInfo } from './SandboxCreator'
+import { Terminal } from './Terminal'
 import { cn } from '@/lib/utils'
 
 interface CommandExecutorProps {
@@ -37,6 +38,7 @@ interface CommandExecution {
 }
 
 export function CommandExecutor({ sandboxId, creationInfo, onDelete }: CommandExecutorProps) {
+  const [activeView, setActiveView] = useState<'terminal' | 'commands'>('terminal')
   const [command, setCommand] = useState('')
   const [timeout, setTimeout] = useState(300)
   const [executions, setExecutions] = useState<CommandExecution[]>(() => [{
@@ -284,24 +286,41 @@ export function CommandExecutor({ sandboxId, creationInfo, onDelete }: CommandEx
 
   return (
     <div className="flex flex-col h-full">
-      {/* Header with sandbox info and delete button */}
+      {/* Header with sandbox info and view toggle */}
       <div className="flex items-center justify-between mb-4 gap-2">
         <div className="flex items-center gap-2 min-w-0">
-          <Terminal className="h-5 w-5 flex-shrink-0" />
+          <TerminalIcon className="h-5 w-5 flex-shrink-0" />
           <span className="font-medium hidden sm:inline">Sandbox:</span>
           <code className="text-sm bg-muted px-2 py-1 rounded truncate">{sandboxId}</code>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
+          {/* View Toggle */}
+          <div className="flex items-center border border-border rounded-lg overflow-hidden">
+            <Button
+              variant={activeView === 'terminal' ? 'default' : 'ghost'}
+              size="sm"
+              onClick={() => setActiveView('terminal')}
+              className="rounded-none border-0"
+              title="Interactive Terminal"
+            >
+              <SquareTerminal className="h-4 w-4" />
+              <span className="hidden sm:inline ml-1">Terminal</span>
+            </Button>
+            <Button
+              variant={activeView === 'commands' ? 'default' : 'ghost'}
+              size="sm"
+              onClick={() => setActiveView('commands')}
+              className="rounded-none border-0"
+              title="Command Executor"
+            >
+              <Code className="h-4 w-4" />
+              <span className="hidden sm:inline ml-1">Commands</span>
+            </Button>
+          </div>
           <Button variant="outline" size="sm" onClick={queryContainerInfo} disabled={isQuerying} title="Query Info">
             {isQuerying ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
             <span className="hidden sm:inline ml-1">Query Info</span>
           </Button>
-          {executions.length > 0 && (
-            <Button variant="outline" size="sm" onClick={clearExecutions} title="Clear History">
-              <Trash2 className="h-4 w-4" />
-              <span className="hidden sm:inline ml-1">Clear History</span>
-            </Button>
-          )}
           <Button variant="destructive" size="sm" onClick={deleteSandbox} title="Delete Sandbox">
             <Trash2 className="h-4 w-4" />
             <span className="hidden sm:inline ml-1">Delete</span>
@@ -309,64 +328,81 @@ export function CommandExecutor({ sandboxId, creationInfo, onDelete }: CommandEx
         </div>
       </div>
 
-      {/* Command Input - Fixed at top */}
-      <div className="border border-border rounded-lg p-3 sm:p-4 bg-muted/30 mb-4">
-        <Textarea
-          value={command}
-          onChange={(e) => setCommand(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="Enter command (e.g., ls -la)&#10;Ctrl+Enter to execute"
-          disabled={isExecuting}
-          className="w-full font-mono bg-background border-2 border-muted-foreground/30 min-h-[60px] sm:min-h-[80px] resize-y mb-3"
-          rows={2}
-        />
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <label className="text-xs text-muted-foreground whitespace-nowrap">Timeout:</label>
-            <Input
-              type="number"
-              value={timeout}
-              onChange={(e) => setTimeout(Math.max(1, Math.min(600, parseInt(e.target.value) || 300)))}
-              className="w-16 h-8 text-sm"
-              min={1}
-              max={600}
-            />
-            <span className="text-xs text-muted-foreground">sec</span>
-          </div>
-          <Button
-            onClick={executeCommand}
-            disabled={!command.trim() || isExecuting}
-            className="w-full sm:w-auto"
-          >
-            {isExecuting ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Play className="h-4 w-4" />
-            )}
-            <span className="ml-2">Execute</span>
-          </Button>
-        </div>
-      </div>
+      {/* Terminal View */}
+      {activeView === 'terminal' && (
+        <Terminal sandboxId={sandboxId} className="flex-1 min-h-[400px]" />
+      )}
 
-      {/* Execution History - Full Width */}
-      <div ref={outputRef} className="flex-1 overflow-y-auto space-y-3">
-        {executions.length === 0 ? (
-          <div className="text-center text-muted-foreground py-8">
-            No commands executed yet. Enter a command above to get started.
-          </div>
-        ) : (
-          executions.map(exec => (
-            <ExecutionCard
-              key={exec.id}
-              execution={exec}
-              onToggle={() => toggleExpanded(exec.id)}
-              formatTime={formatTime}
-              formatDateTime={formatDateTime}
-              truncateCommand={truncateCommand}
+      {/* Commands View */}
+      {activeView === 'commands' && (
+        <>
+          {/* Command Input - Fixed at top */}
+          <div className="border border-border rounded-lg p-3 sm:p-4 bg-muted/30 mb-4">
+            <Textarea
+              value={command}
+              onChange={(e) => setCommand(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Enter command (e.g., ls -la)&#10;Ctrl+Enter to execute"
+              disabled={isExecuting}
+              className="w-full font-mono bg-background border-2 border-muted-foreground/30 min-h-[60px] sm:min-h-[80px] resize-y mb-3"
+              rows={2}
             />
-          ))
-        )}
-      </div>
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <label className="text-xs text-muted-foreground whitespace-nowrap">Timeout:</label>
+                <Input
+                  type="number"
+                  value={timeout}
+                  onChange={(e) => setTimeout(Math.max(1, Math.min(600, parseInt(e.target.value) || 300)))}
+                  className="w-16 h-8 text-sm"
+                  min={1}
+                  max={600}
+                />
+                <span className="text-xs text-muted-foreground">sec</span>
+              </div>
+              <div className="flex items-center gap-2">
+                {executions.length > 0 && (
+                  <Button variant="outline" size="sm" onClick={clearExecutions} title="Clear History">
+                    <Trash2 className="h-4 w-4" />
+                    <span className="hidden sm:inline ml-1">Clear</span>
+                  </Button>
+                )}
+                <Button
+                  onClick={executeCommand}
+                  disabled={!command.trim() || isExecuting}
+                >
+                  {isExecuting ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Play className="h-4 w-4" />
+                  )}
+                  <span className="ml-2">Execute</span>
+                </Button>
+              </div>
+            </div>
+          </div>
+
+          {/* Execution History - Full Width */}
+          <div ref={outputRef} className="flex-1 overflow-y-auto space-y-3">
+            {executions.length === 0 ? (
+              <div className="text-center text-muted-foreground py-8">
+                No commands executed yet. Enter a command above to get started.
+              </div>
+            ) : (
+              executions.map(exec => (
+                <ExecutionCard
+                  key={exec.id}
+                  execution={exec}
+                  onToggle={() => toggleExpanded(exec.id)}
+                  formatTime={formatTime}
+                  formatDateTime={formatDateTime}
+                  truncateCommand={truncateCommand}
+                />
+              ))
+            )}
+          </div>
+        </>
+      )}
     </div>
   )
 }

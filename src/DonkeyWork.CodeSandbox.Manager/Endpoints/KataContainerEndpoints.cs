@@ -1,7 +1,9 @@
+using System.Net.WebSockets;
 using DonkeyWork.CodeSandbox.Manager.Filters;
 using DonkeyWork.CodeSandbox.Manager.Models;
 using DonkeyWork.CodeSandbox.Manager.Services.Container;
 using DonkeyWork.CodeSandbox.Manager.Services.Pool;
+using DonkeyWork.CodeSandbox.Manager.Services.Terminal;
 using Microsoft.AspNetCore.Http.HttpResults;
 
 namespace DonkeyWork.CodeSandbox.Manager.Endpoints;
@@ -60,6 +62,14 @@ public static class KataContainerEndpoints
             .WithSummary("Execute a command in a sandbox")
             .WithDescription("Forwards a command execution request to the CodeExecution API running inside the specified sandbox. Returns Server-Sent Events (SSE) stream with output and completion events. Updates the sandbox's last activity timestamp.")
             .Produces<ExecutionEvent>(StatusCodes.Status200OK, "text/event-stream")
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status500InternalServerError);
+
+        group.MapGet("/{sandboxId}/terminal", HandleTerminalWebSocket)
+            .WithName("TerminalWebSocket")
+            .WithSummary("Open a terminal WebSocket to a sandbox")
+            .WithDescription("Establishes a WebSocket connection for interactive terminal access to the sandbox container via Kubernetes exec. Supports bidirectional stdin/stdout streaming and terminal resize events.")
+            .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
 
@@ -295,6 +305,55 @@ public static class KataContainerEndpoints
                 sandboxId
             });
             await context.Response.WriteAsync($"data: {errorJson}\n\n", cancellationToken);
+        }
+    }
+
+    private static async Task HandleTerminalWebSocket(
+        string sandboxId,
+        ITerminalService terminalService,
+        IKataContainerService containerService,
+        ILogger<Program> logger,
+        HttpContext context,
+        CancellationToken cancellationToken)
+    {
+        if (!context.WebSockets.IsWebSocketRequest)
+        {
+            logger.LogWarning("Non-WebSocket request to terminal endpoint for sandbox {SandboxId}", sandboxId);
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await context.Response.WriteAsync("WebSocket connection required", cancellationToken);
+            return;
+        }
+
+        // Verify sandbox exists
+        var container = await containerService.GetContainerAsync(sandboxId, cancellationToken);
+        if (container == null)
+        {
+            logger.LogWarning("Sandbox not found for terminal connection: {SandboxId}", sandboxId);
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            await context.Response.WriteAsync($"Sandbox {sandboxId} not found", cancellationToken);
+            return;
+        }
+
+        if (!container.IsReady)
+        {
+            logger.LogWarning("Sandbox not ready for terminal connection: {SandboxId}", sandboxId);
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await context.Response.WriteAsync($"Sandbox {sandboxId} is not ready", cancellationToken);
+            return;
+        }
+
+        logger.LogInformation("Accepting WebSocket terminal connection for sandbox {SandboxId}", sandboxId);
+
+        try
+        {
+            using var webSocket = await context.WebSockets.AcceptWebSocketAsync();
+            await terminalService.HandleTerminalSessionAsync(sandboxId, webSocket, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Terminal WebSocket error for sandbox {SandboxId}", sandboxId);
+            // WebSocket is already accepted, so we can't send HTTP error
+            // The connection will just close
         }
     }
 

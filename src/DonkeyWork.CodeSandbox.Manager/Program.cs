@@ -3,6 +3,7 @@ using DonkeyWork.CodeSandbox.Manager.Endpoints;
 using DonkeyWork.CodeSandbox.Manager.Services.Background;
 using DonkeyWork.CodeSandbox.Manager.Services.Container;
 using DonkeyWork.CodeSandbox.Manager.Services.Pool;
+using DonkeyWork.CodeSandbox.Manager.Services.Terminal;
 using k8s;
 using Microsoft.Extensions.Options;
 using Scalar.AspNetCore;
@@ -70,6 +71,7 @@ builder.Services.AddHttpClient();
 // Register application services
 builder.Services.AddScoped<IKataContainerService, KataContainerService>();
 builder.Services.AddScoped<IPoolManager, PoolManager>();
+builder.Services.AddScoped<ITerminalService, TerminalService>();
 
 // Register background services
 builder.Services.AddHostedService<ContainerCleanupService>();
@@ -103,6 +105,12 @@ app.MapScalarApiReference("/scalar", (options, context) =>
 Log.Information("API documentation enabled at /scalar/v1");
 
 app.UseHttpsRedirection();
+
+// Enable WebSockets for terminal connections
+app.UseWebSockets(new WebSocketOptions
+{
+    KeepAliveInterval = TimeSpan.FromSeconds(30)
+});
 
 // Map health checks
 app.MapHealthChecks("/healthz");
