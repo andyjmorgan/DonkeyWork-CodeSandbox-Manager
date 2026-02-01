@@ -4,6 +4,9 @@ WORKDIR /src
 # Copy Directory.Packages.props for central package management
 COPY ["Directory.Packages.props", "./"]
 
+# Copy nuget.config if present (for CI with custom package source)
+COPY nuget.config* ./
+
 # Copy project files
 COPY ["src/DonkeyWork.CodeSandbox.McpServer/DonkeyWork.CodeSandbox.McpServer.csproj", "DonkeyWork.CodeSandbox.McpServer/"]
 RUN dotnet restore "DonkeyWork.CodeSandbox.McpServer/DonkeyWork.CodeSandbox.McpServer.csproj"

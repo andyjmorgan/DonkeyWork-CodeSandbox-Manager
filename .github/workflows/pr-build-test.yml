@@ -42,6 +42,18 @@ jobs:
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
+      - name: Configure NuGet for self-hosted runner
+        run: |
+          cat > nuget.config << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <configuration>
+            <packageSources>
+              <clear />
+              <add key="nexus" value="http://nexus.nexus.svc.cluster.local:8081/repository/nuget.org-proxy/index.json" allowInsecureConnections="true" />
+            </packageSources>
+          </configuration>
+          EOF
+
       - name: Pre-build Docker images for integration tests
         run: |
           docker build -f src/DonkeyWork.CodeSandbox.Server/Dockerfile -t donkeywork-codesandbox-server:test .
@@ -166,6 +178,18 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Configure NuGet for self-hosted runner
+        run: |
+          cat > nuget.config << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <configuration>
+            <packageSources>
+              <clear />
+              <add key="nexus" value="http://nexus.nexus.svc.cluster.local:8081/repository/nuget.org-proxy/index.json" allowInsecureConnections="true" />
+            </packageSources>
+          </configuration>
+          EOF
 
       - name: Restore dependencies
         run: dotnet restore DonkeyWork.CodeSandbox.sln
