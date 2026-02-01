@@ -56,8 +56,8 @@ jobs:
 
       - name: Pre-build Docker images for integration tests
         run: |
-          docker build -f src/DonkeyWork.CodeSandbox.Server/Dockerfile -t donkeywork-codesandbox-server:test .
-          docker build -f src/DonkeyWork.CodeSandbox.McpServer/Dockerfile -t donkeywork-codesandbox-mcpserver:test .
+          docker build --network=host -f src/DonkeyWork.CodeSandbox.Server/Dockerfile -t donkeywork-codesandbox-server:test .
+          docker build --network=host -f src/DonkeyWork.CodeSandbox.McpServer/Dockerfile -t donkeywork-codesandbox-mcpserver:test .
 
       - name: Restore dependencies
         run: dotnet restore DonkeyWork.CodeSandbox.sln
@@ -152,6 +152,18 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Configure NuGet for self-hosted runner
+        run: |
+          cat > nuget.config << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <configuration>
+            <packageSources>
+              <clear />
+              <add key="nexus" value="http://nexus.nexus.svc.cluster.local:8081/repository/nuget.org-proxy/index.json" allowInsecureConnections="true" />
+            </packageSources>
+          </configuration>
+          EOF
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -164,7 +176,7 @@ jobs:
           tags: donkeywork-codesandbox-${{ matrix.name }}:pr-${{ github.event.pull_request.number }}
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
-          platforms: linux/amd64
+          network: host
 
   lint-and-security:
     name: Lint and Security Scan
