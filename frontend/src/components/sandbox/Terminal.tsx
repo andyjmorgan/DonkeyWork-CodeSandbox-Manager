@@ -19,6 +19,7 @@ export function Terminal({ sandboxId, className }: TerminalProps) {
   const xtermRef = useRef<XTerm | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
+  const connectRef = useRef<() => void>(() => {})
   const [status, setStatus] = useState<ConnectionStatus>('disconnected')
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [isFullscreen, setIsFullscreen] = useState(false)
@@ -106,7 +107,7 @@ export function Terminal({ sandboxId, className }: TerminalProps) {
         if (reconnectAttemptRef.current < maxReconnectAttempts) {
           reconnectAttemptRef.current++
           setErrorMessage(`Connection lost. Reconnecting (${reconnectAttemptRef.current}/${maxReconnectAttempts})...`)
-          setTimeout(connect, 1000 * reconnectAttemptRef.current)
+          setTimeout(() => connectRef.current(), 1000 * reconnectAttemptRef.current)
         } else {
           setErrorMessage('Connection lost. Click Reconnect to try again.')
           setStatus('error')
@@ -114,6 +115,11 @@ export function Terminal({ sandboxId, className }: TerminalProps) {
       }
     }
   }, [getWebSocketUrl, sendResize])
+
+  // Keep the ref updated with the latest connect function
+  useEffect(() => {
+    connectRef.current = connect
+  }, [connect])
 
   // Disconnect WebSocket
   const disconnect = useCallback(() => {
@@ -200,15 +206,16 @@ export function Terminal({ sandboxId, className }: TerminalProps) {
       }
     })
 
-    // Auto-connect
-    connect()
+    // Auto-connect (deferred to avoid synchronous setState in effect)
+    const connectTimeout = setTimeout(() => connect(), 0)
 
     // Cleanup
     return () => {
+      clearTimeout(connectTimeout)
       disconnect()
       xterm.dispose()
     }
-  }, [sandboxId]) // Reconnect when sandboxId changes
+  }, [sandboxId, connect, disconnect]) // Reconnect when sandboxId changes
 
   // Handle window resize
   useEffect(() => {
