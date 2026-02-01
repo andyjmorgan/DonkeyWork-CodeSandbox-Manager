@@ -37,13 +37,15 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Pre-build Docker images for integration tests
+        run: |
+          docker build -f src/DonkeyWork.CodeSandbox.Server/Dockerfile -t donkeywork-codesandbox-server:test .
+          docker build -f src/DonkeyWork.CodeSandbox.McpServer/Dockerfile -t donkeywork-codesandbox-mcpserver:test .
 
       - name: Restore dependencies
         run: dotnet restore DonkeyWork.CodeSandbox.sln
@@ -61,7 +63,6 @@ jobs:
             --collect:"XPlat Code Coverage" \
             --results-directory ./TestResults
         env:
-          DOCKER_HOST: unix:///var/run/docker.sock
           TESTCONTAINERS_RYUK_DISABLED: true
 
       - name: Publish test results

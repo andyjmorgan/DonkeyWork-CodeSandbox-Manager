@@ -19,21 +19,27 @@ public class ServerFixture : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        // Build the Docker image from the Dockerfile in the src/DonkeyWork.CodeSandbox.Server directory
-        // Use custom solution directory finder that supports .slnx files
-        var solutionDir = GetSolutionDirectory();
-        var imageFuture = new ImageFromDockerfileBuilder()
-            .WithDockerfileDirectory(solutionDir, string.Empty)
-            .WithDockerfile("src/DonkeyWork.CodeSandbox.Server/Dockerfile")
-            .WithName("donkeywork-codesandbox-server:test")
-            .WithCleanUp(true)
-            .Build();
+        const string imageName = "donkeywork-codesandbox-server:test";
 
-        await imageFuture.CreateAsync();
+        // Check if image already exists (e.g., pre-built in CI)
+        if (!await ImageExistsAsync(imageName))
+        {
+            // Build the Docker image from the Dockerfile in the src/DonkeyWork.CodeSandbox.Server directory
+            // Use custom solution directory finder that supports .slnx files
+            var solutionDir = GetSolutionDirectory();
+            var imageFuture = new ImageFromDockerfileBuilder()
+                .WithDockerfileDirectory(solutionDir, string.Empty)
+                .WithDockerfile("src/DonkeyWork.CodeSandbox.Server/Dockerfile")
+                .WithName(imageName)
+                .WithCleanUp(true)
+                .Build();
+
+            await imageFuture.CreateAsync();
+        }
 
         // Create and start the container
         _container = new ContainerBuilder()
-            .WithImage("donkeywork-codesandbox-server:test")
+            .WithImage(imageName)
             .WithPortBinding(ServerPort, true)
             .WithWaitStrategy(Wait.ForUnixContainer().UntilPortIsAvailable(ServerPort))
             .Build();
@@ -49,6 +55,26 @@ public class ServerFixture : IAsyncLifetime
 
         // Verify the server is responding by attempting a simple connection check
         await WaitForServerHealthAsync();
+    }
+
+    private static async Task<bool> ImageExistsAsync(string imageName)
+    {
+        try
+        {
+            using var dockerClient = new Docker.DotNet.DockerClientConfiguration().CreateClient();
+            var images = await dockerClient.Images.ListImagesAsync(new Docker.DotNet.Models.ImagesListParameters
+            {
+                Filters = new Dictionary<string, IDictionary<string, bool>>
+                {
+                    ["reference"] = new Dictionary<string, bool> { [imageName] = true }
+                }
+            });
+            return images.Count > 0;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private async Task WaitForServerHealthAsync()
