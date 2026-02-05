@@ -1,13 +1,17 @@
 import type { ReactNode } from 'react'
+import type { ActiveSection } from '@/App'
 import { ThemeToggle } from './ThemeToggle'
-import { Github } from 'lucide-react'
+import { Github, Box, Server } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
 
 interface AppLayoutProps {
   children: ReactNode
+  activeSection: ActiveSection
+  onSectionChange: (section: ActiveSection) => void
 }
 
-export function AppLayout({ children }: AppLayoutProps) {
+export function AppLayout({ children, activeSection, onSectionChange }: AppLayoutProps) {
   return (
     <div className="flex flex-col h-screen bg-background text-foreground">
       {/* Header */}
@@ -19,8 +23,37 @@ export function AppLayout({ children }: AppLayoutProps) {
               alt="DonkeyWork Logo"
               className="w-7 h-7"
             />
-            <h1 className="text-xl font-semibold">Sandbox Manager</h1>
+            <h1 className="text-xl font-semibold hidden sm:block">Sandbox Manager</h1>
           </div>
+
+          {/* Navigation */}
+          <nav className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => onSectionChange('sandboxes')}
+              className={cn(
+                "gap-2",
+                activeSection === 'sandboxes' && "bg-muted text-foreground"
+              )}
+            >
+              <Box className="h-4 w-4" />
+              <span className="hidden sm:inline">Sandboxes</span>
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => onSectionChange('mcp-servers')}
+              className={cn(
+                "gap-2",
+                activeSection === 'mcp-servers' && "bg-muted text-foreground"
+              )}
+            >
+              <Server className="h-4 w-4" />
+              <span className="hidden sm:inline">MCP Servers</span>
+            </Button>
+          </nav>
+
           <div className="flex items-center gap-2">
             <Button
               variant="ghost"

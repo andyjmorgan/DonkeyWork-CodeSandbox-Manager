@@ -315,6 +315,9 @@ public class KataContainerService : IKataContainerService
 
             var kataContainers = podList.Items
                 .Where(p => p.Spec.RuntimeClassName == _config.RuntimeClassName)
+                // Exclude MCP containers - only show sandbox containers (missing label treated as sandbox for backwards compat)
+                .Where(p => !p.Metadata.Labels?.ContainsKey("container-type") == true
+                    || p.Metadata.Labels?.GetValueOrDefault("container-type") == "sandbox")
                 .Select(MapPodToContainerInfo)
                 .ToList();
 
@@ -479,6 +482,7 @@ public class KataContainerService : IKataContainerService
             ["app"] = "kata-manager",
             ["runtime"] = "kata",
             ["managed-by"] = "CodeSandbox-Manager",
+            ["container-type"] = "sandbox",
             ["pool-status"] = PoolManager.PoolStatusManual  // Mark as manually created
         };
 

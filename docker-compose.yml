@@ -22,6 +22,12 @@ services:
       - KataContainerManager__PodNamePrefix=kata-sandbox
       - KataContainerManager__CleanupCompletedPods=true
       - KataContainerManager__PodReadyTimeoutSeconds=90
+      # MCP Server Configuration
+      - KataContainerManager__McpServerImage=ghcr.io/andyjmorgan/donkeywork-codesandbox-mcpserver:latest
+      - KataContainerManager__McpPodNamePrefix=kata-mcp
+      - KataContainerManager__McpWarmPoolSize=5
+      - KataContainerManager__McpIdleTimeoutMinutes=60
+      - KataContainerManager__McpMaxContainerLifetimeMinutes=480
       # Serilog Configuration
       - Serilog__MinimumLevel__Default=Information
       - Serilog__MinimumLevel__Override__Microsoft=Warning
