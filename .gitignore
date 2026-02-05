@@ -32,6 +32,7 @@ TestResults/
 *.snupkg
 .nuget/
 packages/
+nuget.config
 
 # Build results
 [Dd]ebug/

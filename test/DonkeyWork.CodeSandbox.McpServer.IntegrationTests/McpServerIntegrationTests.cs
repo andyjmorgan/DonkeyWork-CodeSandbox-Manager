@@ -185,7 +185,8 @@ public class McpServerIntegrationTests : IClassFixture<McpServerFixture>
         Assert.Equal(1, root.GetProperty("id").GetInt32());
         Assert.True(root.TryGetProperty("result", out var result));
         Assert.True(result.TryGetProperty("serverInfo", out var serverInfo));
-        Assert.Equal("everything", serverInfo.GetProperty("name").GetString());
+        var serverName = serverInfo.GetProperty("name").GetString();
+        Assert.Contains("everything", serverName); // Server name may be "everything" or "mcp-servers/everything"
 
         // Cleanup
         await _client.DeleteAsync("/api/mcp");
@@ -283,7 +284,7 @@ public class McpServerIntegrationTests : IClassFixture<McpServerFixture>
 
         var jsonRpc = BuildJsonRpc("tools/call", 5, new
         {
-            name = "add",
+            name = "get-sum",
             arguments = new { a = 3, b = 7 }
         });
 

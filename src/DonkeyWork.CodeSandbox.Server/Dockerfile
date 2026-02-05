@@ -4,6 +4,9 @@ WORKDIR /src
 # Copy Directory.Packages.props for central package management
 COPY ["Directory.Packages.props", "./"]
 
+# Copy nuget.config if present (for CI with custom package source)
+COPY nuget.config* ./
+
 # Copy project files
 COPY ["src/DonkeyWork.CodeSandbox.Contracts/DonkeyWork.CodeSandbox.Contracts.csproj", "DonkeyWork.CodeSandbox.Contracts/"]
 COPY ["src/DonkeyWork.CodeSandbox.Server/DonkeyWork.CodeSandbox.Server.csproj", "DonkeyWork.CodeSandbox.Server/"]

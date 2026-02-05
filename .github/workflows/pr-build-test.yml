@@ -29,7 +29,7 @@ env:
 jobs:
   build-and-test:
     name: Build and Test
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
 
     steps:
       - name: Checkout code
@@ -41,6 +41,23 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Configure NuGet for self-hosted runner
+        run: |
+          cat > nuget.config << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <configuration>
+            <packageSources>
+              <clear />
+              <add key="nexus" value="http://nexus.nexus.svc.cluster.local:8081/repository/nuget.org-proxy/index.json" allowInsecureConnections="true" />
+            </packageSources>
+          </configuration>
+          EOF
+
+      - name: Pre-build Docker images for integration tests
+        run: |
+          docker build --network=host -f src/DonkeyWork.CodeSandbox.Server/Dockerfile -t donkeywork-codesandbox-server:test .
+          docker build --network=host -f src/DonkeyWork.CodeSandbox.McpServer/Dockerfile -t donkeywork-codesandbox-mcpserver:test .
 
       - name: Restore dependencies
         run: dotnet restore DonkeyWork.CodeSandbox.sln
@@ -57,6 +74,8 @@ jobs:
             --logger "trx;LogFileName=test-results.trx" \
             --collect:"XPlat Code Coverage" \
             --results-directory ./TestResults
+        env:
+          TESTCONTAINERS_RYUK_DISABLED: true
 
       - name: Publish test results
         uses: dorny/test-reporter@v1
@@ -77,7 +96,7 @@ jobs:
 
   frontend-build:
     name: Frontend Build and Lint
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
 
     steps:
       - name: Checkout code
@@ -111,7 +130,7 @@ jobs:
 
   docker-build:
     name: Docker Build (Validation)
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: [build-and-test, frontend-build]
     strategy:
       matrix:
@@ -133,6 +152,18 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Configure NuGet for self-hosted runner
+        run: |
+          cat > nuget.config << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <configuration>
+            <packageSources>
+              <clear />
+              <add key="nexus" value="http://nexus.nexus.svc.cluster.local:8081/repository/nuget.org-proxy/index.json" allowInsecureConnections="true" />
+            </packageSources>
+          </configuration>
+          EOF
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -145,11 +176,11 @@ jobs:
           tags: donkeywork-codesandbox-${{ matrix.name }}:pr-${{ github.event.pull_request.number }}
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
-          platforms: linux/amd64
+          network: host
 
   lint-and-security:
     name: Lint and Security Scan
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
 
     steps:
       - name: Checkout code
@@ -159,6 +190,18 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Configure NuGet for self-hosted runner
+        run: |
+          cat > nuget.config << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <configuration>
+            <packageSources>
+              <clear />
+              <add key="nexus" value="http://nexus.nexus.svc.cluster.local:8081/repository/nuget.org-proxy/index.json" allowInsecureConnections="true" />
+            </packageSources>
+          </configuration>
+          EOF
 
       - name: Restore dependencies
         run: dotnet restore DonkeyWork.CodeSandbox.sln
@@ -172,7 +215,7 @@ jobs:
 
   pr-status:
     name: PR Status
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: [build-and-test, frontend-build, docker-build, lint-and-security]
     if: always()
 

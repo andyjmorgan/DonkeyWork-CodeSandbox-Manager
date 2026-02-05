@@ -19,18 +19,24 @@ public class McpServerFixture : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        var solutionDir = GetSolutionDirectory();
-        var imageFuture = new ImageFromDockerfileBuilder()
-            .WithDockerfileDirectory(solutionDir, string.Empty)
-            .WithDockerfile("src/DonkeyWork.CodeSandbox.McpServer/Dockerfile")
-            .WithName("donkeywork-codesandbox-mcpserver:test")
-            .WithCleanUp(true)
-            .Build();
+        const string imageName = "donkeywork-codesandbox-mcpserver:test";
 
-        await imageFuture.CreateAsync();
+        // Check if image already exists (e.g., pre-built in CI)
+        if (!await ImageExistsAsync(imageName))
+        {
+            var solutionDir = GetSolutionDirectory();
+            var imageFuture = new ImageFromDockerfileBuilder()
+                .WithDockerfileDirectory(solutionDir, string.Empty)
+                .WithDockerfile("src/DonkeyWork.CodeSandbox.McpServer/Dockerfile")
+                .WithName(imageName)
+                .WithCleanUp(true)
+                .Build();
+
+            await imageFuture.CreateAsync();
+        }
 
         _container = new ContainerBuilder()
-            .WithImage("donkeywork-codesandbox-mcpserver:test")
+            .WithImage(imageName)
             .WithPortBinding(ServerPort, true)
             .WithWaitStrategy(Wait.ForUnixContainer().UntilPortIsAvailable(ServerPort))
             .Build();
@@ -42,6 +48,26 @@ public class McpServerFixture : IAsyncLifetime
 
         await Task.Delay(2000);
         await WaitForServerHealthAsync();
+    }
+
+    private static async Task<bool> ImageExistsAsync(string imageName)
+    {
+        try
+        {
+            using var dockerClient = new Docker.DotNet.DockerClientConfiguration().CreateClient();
+            var images = await dockerClient.Images.ListImagesAsync(new Docker.DotNet.Models.ImagesListParameters
+            {
+                Filters = new Dictionary<string, IDictionary<string, bool>>
+                {
+                    ["reference"] = new Dictionary<string, bool> { [imageName] = true }
+                }
+            });
+            return images.Count > 0;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private async Task WaitForServerHealthAsync()
