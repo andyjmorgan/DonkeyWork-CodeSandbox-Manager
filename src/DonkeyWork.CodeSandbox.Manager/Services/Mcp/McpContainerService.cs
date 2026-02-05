@@ -448,10 +448,10 @@ public class McpContainerService : IMcpContainerService
                 .Where(p => p.Spec.RuntimeClassName == _config.RuntimeClassName)
                 .ToList();
 
-            var creating = pods.Count(p => p.Metadata.Labels?.GetValueOrDefault("pool-status") == "creating");
-            var warm = pods.Count(p => p.Metadata.Labels?.GetValueOrDefault("pool-status") == "warm");
-            var allocated = pods.Count(p => p.Metadata.Labels?.GetValueOrDefault("pool-status") == "allocated");
-            var manual = pods.Count(p => p.Metadata.Labels?.GetValueOrDefault("pool-status") == "manual");
+            var creating = pods.Count(p => p.Metadata.Labels?.TryGetValue("pool-status", out var s1) == true && s1 == "creating");
+            var warm = pods.Count(p => p.Metadata.Labels?.TryGetValue("pool-status", out var s2) == true && s2 == "warm");
+            var allocated = pods.Count(p => p.Metadata.Labels?.TryGetValue("pool-status", out var s3) == true && s3 == "allocated");
+            var manual = pods.Count(p => p.Metadata.Labels?.TryGetValue("pool-status", out var s4) == true && s4 == "manual");
             var total = creating + warm + allocated + manual;
 
             var readyPercentage = _config.McpWarmPoolSize > 0

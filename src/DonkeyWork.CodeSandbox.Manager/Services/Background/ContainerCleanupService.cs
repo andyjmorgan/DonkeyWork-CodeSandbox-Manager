@@ -85,7 +85,8 @@ public class ContainerCleanupService : BackgroundService
         foreach (var pod in allActiveContainers)
         {
             // Determine timeouts based on container type
-            var isMcp = pod.Metadata.Labels?.GetValueOrDefault(PoolManager.ContainerTypeLabel) == PoolManager.ContainerTypeMcp;
+            var isMcp = pod.Metadata.Labels?.TryGetValue(PoolManager.ContainerTypeLabel, out var containerType) == true
+                && containerType == PoolManager.ContainerTypeMcp;
             var idleThreshold = TimeSpan.FromMinutes(isMcp ? _config.McpIdleTimeoutMinutes : _config.IdleTimeoutMinutes);
             var maxLifetime = TimeSpan.FromMinutes(isMcp ? _config.McpMaxContainerLifetimeMinutes : _config.MaxContainerLifetimeMinutes);
 
@@ -128,14 +129,14 @@ public class ContainerCleanupService : BackgroundService
         // Delete expired containers first (hard limit)
         foreach (var pod in expiredContainers)
         {
-            var type = pod.Metadata.Labels?.GetValueOrDefault(PoolManager.ContainerTypeLabel) ?? "sandbox";
+            var type = pod.Metadata.Labels?.TryGetValue(PoolManager.ContainerTypeLabel, out var expType) == true ? expType : "sandbox";
             await DeletePodAsync(pod.Metadata.Name, $"exceeded max lifetime ({type})", cancellationToken);
         }
 
         // Delete idle containers
         foreach (var pod in idleContainers)
         {
-            var type = pod.Metadata.Labels?.GetValueOrDefault(PoolManager.ContainerTypeLabel) ?? "sandbox";
+            var type = pod.Metadata.Labels?.TryGetValue(PoolManager.ContainerTypeLabel, out var idleType) == true ? idleType : "sandbox";
             await DeletePodAsync(pod.Metadata.Name, $"idle timeout ({type})", cancellationToken);
         }
     }
