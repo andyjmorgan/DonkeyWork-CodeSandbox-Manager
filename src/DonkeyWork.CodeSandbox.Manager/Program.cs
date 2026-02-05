@@ -1,3 +1,4 @@
+// Kata Container Manager API - manages sandbox containers with WebSocket terminal support
 using DonkeyWork.CodeSandbox.Manager.Configuration;
 using DonkeyWork.CodeSandbox.Manager.Endpoints;
 using DonkeyWork.CodeSandbox.Manager.Services.Background;
