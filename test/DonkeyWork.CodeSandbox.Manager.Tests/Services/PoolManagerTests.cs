@@ -31,6 +31,7 @@ public class PoolManagerTests
             RuntimeClassName = "kata-qemu",
             PodNamePrefix = "kata-sandbox",
             WarmPoolSize = 10,
+            McpWarmPoolSize = 0,  // Disable MCP pool for these tests
             MaxTotalContainers = 50,
             IdleTimeoutMinutes = 5,
             MaxContainerLifetimeMinutes = 15,
@@ -52,11 +53,11 @@ public class PoolManagerTests
     [Fact]
     public async Task GetPoolStatisticsAsync_ReturnsCorrectStatistics()
     {
-        // Arrange
-        SetupPodListForLabel("pool-status=creating", 2);
-        SetupPodListForLabel("pool-status=warm", 8);
-        SetupPodListForLabel("pool-status=allocated", 5);
-        SetupPodListForLabel("pool-status=manual", 3);
+        // Arrange - PoolManager queries include container-type=sandbox filter
+        SetupPodListForLabel("pool-status=creating,container-type=sandbox", 2);
+        SetupPodListForLabel("pool-status=warm,container-type=sandbox", 8);
+        SetupPodListForLabel("pool-status=allocated,container-type=sandbox", 5);
+        SetupPodListForLabel("pool-status=manual,container-type=sandbox", 3);
 
         // Act
         var result = await _poolManager.GetPoolStatisticsAsync();
@@ -77,11 +78,11 @@ public class PoolManagerTests
     [Fact]
     public async Task GetPoolStatisticsAsync_WithNoContainers_ReturnsZeros()
     {
-        // Arrange
-        SetupPodListForLabel("pool-status=creating", 0);
-        SetupPodListForLabel("pool-status=warm", 0);
-        SetupPodListForLabel("pool-status=allocated", 0);
-        SetupPodListForLabel("pool-status=manual", 0);
+        // Arrange - PoolManager queries include container-type=sandbox filter
+        SetupPodListForLabel("pool-status=creating,container-type=sandbox", 0);
+        SetupPodListForLabel("pool-status=warm,container-type=sandbox", 0);
+        SetupPodListForLabel("pool-status=allocated,container-type=sandbox", 0);
+        SetupPodListForLabel("pool-status=manual,container-type=sandbox", 0);
 
         // Act
         var result = await _poolManager.GetPoolStatisticsAsync();
@@ -99,11 +100,11 @@ public class PoolManagerTests
     [Fact]
     public async Task GetPoolStatisticsAsync_IncludesMaxTotalContainers()
     {
-        // Arrange
-        SetupPodListForLabel("pool-status=creating", 0);
-        SetupPodListForLabel("pool-status=warm", 5);
-        SetupPodListForLabel("pool-status=allocated", 0);
-        SetupPodListForLabel("pool-status=manual", 0);
+        // Arrange - PoolManager queries include container-type=sandbox filter
+        SetupPodListForLabel("pool-status=creating,container-type=sandbox", 0);
+        SetupPodListForLabel("pool-status=warm,container-type=sandbox", 5);
+        SetupPodListForLabel("pool-status=allocated,container-type=sandbox", 0);
+        SetupPodListForLabel("pool-status=manual,container-type=sandbox", 0);
 
         // Act
         var result = await _poolManager.GetPoolStatisticsAsync();
@@ -146,9 +147,9 @@ public class PoolManagerTests
     [Fact]
     public async Task BackfillPoolAsync_WhenPoolIsFull_DoesNotCreateNewPods()
     {
-        // Arrange
-        SetupPodListForLabel("pool-status=creating", 5);
-        SetupPodListForLabel("pool-status=warm", 5);
+        // Arrange - BackfillPoolAsync queries include container-type filter
+        SetupPodListForLabel("pool-status=creating,container-type=sandbox", 5);
+        SetupPodListForLabel("pool-status=warm,container-type=sandbox", 5);
         SetupAllPodsListResponse(CreatePodList(10));
 
         // Act
@@ -170,8 +171,8 @@ public class PoolManagerTests
     {
         // Arrange - pool has deficit but we're at max container limit
         _config.MaxTotalContainers = 10;
-        SetupPodListForLabel("pool-status=creating", 2);
-        SetupPodListForLabel("pool-status=warm", 3);
+        SetupPodListForLabel("pool-status=creating,container-type=sandbox", 2);
+        SetupPodListForLabel("pool-status=warm,container-type=sandbox", 3);
         SetupAllPodsListResponse(CreatePodList(10)); // Already at max
 
         // Act
@@ -196,8 +197,8 @@ public class PoolManagerTests
         // Arrange - need 5 to fill pool but only 2 capacity available
         _config.MaxTotalContainers = 10;
         _config.WarmPoolSize = 10;
-        SetupPodListForLabel("pool-status=creating", 2);
-        SetupPodListForLabel("pool-status=warm", 3); // Need 5 more for pool
+        SetupPodListForLabel("pool-status=creating,container-type=sandbox", 2);
+        SetupPodListForLabel("pool-status=warm,container-type=sandbox", 3); // Need 5 more for pool
         SetupAllPodsListResponse(CreatePodList(8)); // Only 2 capacity available
 
         var createdResponse = new HttpOperationResponse<V1Pod>
@@ -227,15 +228,15 @@ public class PoolManagerTests
                 It.IsAny<CancellationToken>()),
             Times.Exactly(2));
 
-        VerifyLogWarning(_mockLogger, "Limiting backfill");
+        VerifyLogWarning(_mockLogger, "Limiting sandbox backfill");
     }
 
     [Fact]
     public async Task BackfillPoolAsync_WithDeficitAndCapacity_CreatesPods()
     {
-        // Arrange
-        SetupPodListForLabel("pool-status=creating", 0);
-        SetupPodListForLabel("pool-status=warm", 5); // Need 5 more
+        // Arrange - BackfillPoolAsync queries include container-type filter
+        SetupPodListForLabel("pool-status=creating,container-type=sandbox", 0);
+        SetupPodListForLabel("pool-status=warm,container-type=sandbox", 5); // Need 5 more
         SetupAllPodsListResponse(CreatePodList(5)); // Plenty of capacity
 
         var createdResponse = new HttpOperationResponse<V1Pod>
