@@ -113,10 +113,6 @@ jobs:
     outputs:
       version: ${{ steps.semver.outputs.version }}
       tag: ${{ steps.semver.outputs.tag }}
-      manager-changed: ${{ steps.changes.outputs.manager }}
-      executor-changed: ${{ steps.changes.outputs.executor }}
-      mcp-server-changed: ${{ steps.changes.outputs.mcp-server }}
-      frontend-changed: ${{ steps.changes.outputs.frontend }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -137,30 +133,6 @@ jobs:
           echo "version=${{ steps.gitversion.outputs.semVer }}" >> $GITHUB_OUTPUT
           echo "tag=v${{ steps.gitversion.outputs.semVer }}" >> $GITHUB_OUTPUT
 
-      - name: Detect changes
-        id: changes
-        uses: dorny/paths-filter@v3
-        with:
-          filters: |
-            manager:
-              - 'src/DonkeyWork.CodeSandbox.Manager/**'
-              - 'src/DonkeyWork.CodeSandbox.Contracts/**'
-              - 'src/DonkeyWork.CodeSandbox.Client/**'
-              - 'Dockerfile'
-              - 'Directory.Packages.props'
-              - '*.sln'
-            executor:
-              - 'src/DonkeyWork.CodeSandbox.Server/**'
-              - 'src/DonkeyWork.CodeSandbox.Contracts/**'
-              - 'Directory.Packages.props'
-              - '*.sln'
-            mcp-server:
-              - 'src/DonkeyWork.CodeSandbox.McpServer/**'
-              - 'Directory.Packages.props'
-              - '*.sln'
-            frontend:
-              - 'frontend/**'
-
   docker-build:
     name: Build ${{ matrix.component }}
     runs-on: self-hosted
@@ -175,41 +147,29 @@ jobs:
             context: .
             title: Kata Container Manager
             description: REST API for managing Kata containers in Kubernetes
-            changed: manager-changed
           - component: executor
             image: donkeywork-codesandbox-executor
             dockerfile: ./src/DonkeyWork.CodeSandbox.Server/Dockerfile
             context: .
             title: DonkeyWork CodeSandbox Server
             description: HTTP+SSE server for executing bash commands with Python and Node.js support
-            changed: executor-changed
           - component: mcp-server
             image: donkeywork-codesandbox-mcp-server
             dockerfile: ./src/DonkeyWork.CodeSandbox.McpServer/Dockerfile
             context: .
             title: DonkeyWork CodeSandbox MCP Server
             description: MCP bridge server for AI agent integration
-            changed: mcp-server-changed
           - component: frontend
             image: donkeywork-codesandbox-frontend
             dockerfile: ./frontend/Dockerfile
             context: ./frontend
             title: DonkeyWork CodeSandbox Frontend
             description: Web UI for managing Kata sandbox containers
-            changed: frontend-changed
     steps:
-      - name: Check if build needed
-        id: check
-        run: |
-          CHANGED="${{ needs.prepare-release.outputs[matrix.changed] }}"
-          echo "should-build=${CHANGED}" >> $GITHUB_OUTPUT
-          echo "Component ${{ matrix.component }} changed: ${CHANGED}"
-
       - uses: actions/checkout@v4
-        if: steps.check.outputs.should-build == 'true'
 
       - name: Configure NuGet for self-hosted runner
-        if: steps.check.outputs.should-build == 'true' && matrix.component != 'frontend'
+        if: matrix.component != 'frontend'
         run: |
           cat > nuget.config << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
@@ -222,13 +182,10 @@ jobs:
           EOF
 
       - uses: docker/setup-qemu-action@v3
-        if: steps.check.outputs.should-build == 'true'
 
       - uses: docker/setup-buildx-action@v3
-        if: steps.check.outputs.should-build == 'true'
 
       - name: Log in to GitHub Container Registry
-        if: steps.check.outputs.should-build == 'true'
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
@@ -236,7 +193,6 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Extract metadata
-        if: steps.check.outputs.should-build == 'true'
         id: meta
         uses: docker/metadata-action@v5
         with:
@@ -254,7 +210,6 @@ jobs:
             org.opencontainers.image.version=${{ needs.prepare-release.outputs.version }}
 
       - name: Build and push Docker image
-        if: steps.check.outputs.should-build == 'true'
         id: build
         uses: docker/build-push-action@v5
         with:
@@ -271,18 +226,11 @@ jobs:
           sbom: true
 
       - name: Generate summary
-        if: steps.check.outputs.should-build == 'true'
         run: |
           echo "## ${{ matrix.title }} Published" >> $GITHUB_STEP_SUMMARY
           echo "**Image:** \`${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}\`" >> $GITHUB_STEP_SUMMARY
           echo "**Version:** \`${{ needs.prepare-release.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
           echo "**Digest:** \`${{ steps.build.outputs.digest }}\`" >> $GITHUB_STEP_SUMMARY
-
-      - name: Skip summary
-        if: steps.check.outputs.should-build != 'true'
-        run: |
-          echo "## ${{ matrix.title }} Skipped" >> $GITHUB_STEP_SUMMARY
-          echo "No changes detected for this component." >> $GITHUB_STEP_SUMMARY
 
   create-release:
     name: Create GitHub Release
@@ -297,10 +245,6 @@ jobs:
       - name: Generate changelog
         env:
           VERSION: ${{ needs.prepare-release.outputs.version }}
-          MANAGER_CHANGED: ${{ needs.prepare-release.outputs.manager-changed }}
-          EXECUTOR_CHANGED: ${{ needs.prepare-release.outputs.executor-changed }}
-          MCP_SERVER_CHANGED: ${{ needs.prepare-release.outputs.mcp-server-changed }}
-          FRONTEND_CHANGED: ${{ needs.prepare-release.outputs.frontend-changed }}
         run: |
           PREVIOUS_TAG=$(git describe --abbrev=0 --tags 2>/dev/null || echo "")
 
@@ -312,12 +256,11 @@ jobs:
             git log ${PREVIOUS_TAG}..HEAD --pretty=format:"* %s (%h)" --no-merges >> CHANGELOG.md
           fi
 
-          echo -e "\n\n## Docker Images Updated\n" >> CHANGELOG.md
-
-          [ "$MANAGER_CHANGED" == "true" ] && echo -e "### Manager API\n\`\`\`bash\ndocker pull ${{ env.REGISTRY }}/${{ github.repository_owner }}/donkeywork-codesandbox-manager:${VERSION}\n\`\`\`\n" >> CHANGELOG.md
-          [ "$EXECUTOR_CHANGED" == "true" ] && echo -e "### Executor API\n\`\`\`bash\ndocker pull ${{ env.REGISTRY }}/${{ github.repository_owner }}/donkeywork-codesandbox-executor:${VERSION}\n\`\`\`\n" >> CHANGELOG.md
-          [ "$MCP_SERVER_CHANGED" == "true" ] && echo -e "### MCP Server\n\`\`\`bash\ndocker pull ${{ env.REGISTRY }}/${{ github.repository_owner }}/donkeywork-codesandbox-mcp-server:${VERSION}\n\`\`\`\n" >> CHANGELOG.md
-          [ "$FRONTEND_CHANGED" == "true" ] && echo -e "### Frontend\n\`\`\`bash\ndocker pull ${{ env.REGISTRY }}/${{ github.repository_owner }}/donkeywork-codesandbox-frontend:${VERSION}\n\`\`\`\n" >> CHANGELOG.md
+          echo -e "\n\n## Docker Images\n" >> CHANGELOG.md
+          echo -e "### Manager API\n\`\`\`bash\ndocker pull ${{ env.REGISTRY }}/${{ github.repository_owner }}/donkeywork-codesandbox-manager:${VERSION}\n\`\`\`\n" >> CHANGELOG.md
+          echo -e "### Executor\n\`\`\`bash\ndocker pull ${{ env.REGISTRY }}/${{ github.repository_owner }}/donkeywork-codesandbox-executor:${VERSION}\n\`\`\`\n" >> CHANGELOG.md
+          echo -e "### MCP Server\n\`\`\`bash\ndocker pull ${{ env.REGISTRY }}/${{ github.repository_owner }}/donkeywork-codesandbox-mcp-server:${VERSION}\n\`\`\`\n" >> CHANGELOG.md
+          echo -e "### Frontend\n\`\`\`bash\ndocker pull ${{ env.REGISTRY }}/${{ github.repository_owner }}/donkeywork-codesandbox-frontend:${VERSION}\n\`\`\`\n" >> CHANGELOG.md
 
           echo "**Platforms:** linux/amd64, linux/arm64" >> CHANGELOG.md
 
@@ -341,26 +284,22 @@ jobs:
       - name: Generate summary
         env:
           VERSION: ${{ needs.prepare-release.outputs.version }}
-          MANAGER_CHANGED: ${{ needs.prepare-release.outputs.manager-changed }}
-          EXECUTOR_CHANGED: ${{ needs.prepare-release.outputs.executor-changed }}
-          MCP_SERVER_CHANGED: ${{ needs.prepare-release.outputs.mcp-server-changed }}
-          FRONTEND_CHANGED: ${{ needs.prepare-release.outputs.frontend-changed }}
         run: |
           echo "# Release Summary" >> $GITHUB_STEP_SUMMARY
           echo "## Version: ${VERSION}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Component | Changed | Status |" >> $GITHUB_STEP_SUMMARY
-          echo "|-----------|---------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Manager | ${MANAGER_CHANGED} | ${{ needs.docker-build.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Executor | ${EXECUTOR_CHANGED} | ${{ needs.docker-build.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| MCP Server | ${MCP_SERVER_CHANGED} | ${{ needs.docker-build.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Frontend | ${FRONTEND_CHANGED} | ${{ needs.docker-build.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| GitHub Release | - | ${{ needs.create-release.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Component | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Manager | ${{ needs.docker-build.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Executor | ${{ needs.docker-build.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| MCP Server | ${{ needs.docker-build.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Frontend | ${{ needs.docker-build.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| GitHub Release | ${{ needs.create-release.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Images Built This Release" >> $GITHUB_STEP_SUMMARY
+          echo "### Docker Images" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
-          [ "$MANAGER_CHANGED" == "true" ] && echo "docker pull ${{ env.REGISTRY }}/${{ github.repository_owner }}/donkeywork-codesandbox-manager:${VERSION}" >> $GITHUB_STEP_SUMMARY
-          [ "$EXECUTOR_CHANGED" == "true" ] && echo "docker pull ${{ env.REGISTRY }}/${{ github.repository_owner }}/donkeywork-codesandbox-executor:${VERSION}" >> $GITHUB_STEP_SUMMARY
-          [ "$MCP_SERVER_CHANGED" == "true" ] && echo "docker pull ${{ env.REGISTRY }}/${{ github.repository_owner }}/donkeywork-codesandbox-mcp-server:${VERSION}" >> $GITHUB_STEP_SUMMARY
-          [ "$FRONTEND_CHANGED" == "true" ] && echo "docker pull ${{ env.REGISTRY }}/${{ github.repository_owner }}/donkeywork-codesandbox-frontend:${VERSION}" >> $GITHUB_STEP_SUMMARY
+          echo "docker pull ${{ env.REGISTRY }}/${{ github.repository_owner }}/donkeywork-codesandbox-manager:${VERSION}" >> $GITHUB_STEP_SUMMARY
+          echo "docker pull ${{ env.REGISTRY }}/${{ github.repository_owner }}/donkeywork-codesandbox-executor:${VERSION}" >> $GITHUB_STEP_SUMMARY
+          echo "docker pull ${{ env.REGISTRY }}/${{ github.repository_owner }}/donkeywork-codesandbox-mcp-server:${VERSION}" >> $GITHUB_STEP_SUMMARY
+          echo "docker pull ${{ env.REGISTRY }}/${{ github.repository_owner }}/donkeywork-codesandbox-frontend:${VERSION}" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
