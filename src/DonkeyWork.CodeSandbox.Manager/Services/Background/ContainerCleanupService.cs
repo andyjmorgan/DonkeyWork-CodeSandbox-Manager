@@ -78,14 +78,17 @@ public class ContainerCleanupService : BackgroundService
         }
 
         var now = DateTimeOffset.UtcNow;
-        var idleThreshold = TimeSpan.FromMinutes(_config.IdleTimeoutMinutes);
-        var maxLifetime = TimeSpan.FromMinutes(_config.MaxContainerLifetimeMinutes);
 
         var idleContainers = new List<V1Pod>();
         var expiredContainers = new List<V1Pod>();
 
         foreach (var pod in allActiveContainers)
         {
+            // Determine timeouts based on container type
+            var isMcp = pod.Metadata.Labels?.GetValueOrDefault(PoolManager.ContainerTypeLabel) == PoolManager.ContainerTypeMcp;
+            var idleThreshold = TimeSpan.FromMinutes(isMcp ? _config.McpIdleTimeoutMinutes : _config.IdleTimeoutMinutes);
+            var maxLifetime = TimeSpan.FromMinutes(isMcp ? _config.McpMaxContainerLifetimeMinutes : _config.MaxContainerLifetimeMinutes);
+
             // Use allocation time for max lifetime checks (not creation time)
             var allocatedAt = PoolManager.ParseTimestampAnnotation(
                 pod.Metadata.Annotations,
@@ -125,13 +128,15 @@ public class ContainerCleanupService : BackgroundService
         // Delete expired containers first (hard limit)
         foreach (var pod in expiredContainers)
         {
-            await DeletePodAsync(pod.Metadata.Name, "exceeded max lifetime", cancellationToken);
+            var type = pod.Metadata.Labels?.GetValueOrDefault(PoolManager.ContainerTypeLabel) ?? "sandbox";
+            await DeletePodAsync(pod.Metadata.Name, $"exceeded max lifetime ({type})", cancellationToken);
         }
 
         // Delete idle containers
         foreach (var pod in idleContainers)
         {
-            await DeletePodAsync(pod.Metadata.Name, "idle timeout", cancellationToken);
+            var type = pod.Metadata.Labels?.GetValueOrDefault(PoolManager.ContainerTypeLabel) ?? "sandbox";
+            await DeletePodAsync(pod.Metadata.Name, $"idle timeout ({type})", cancellationToken);
         }
     }
 

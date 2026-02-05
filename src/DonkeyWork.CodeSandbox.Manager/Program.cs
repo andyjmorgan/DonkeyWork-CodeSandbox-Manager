@@ -3,6 +3,7 @@ using DonkeyWork.CodeSandbox.Manager.Configuration;
 using DonkeyWork.CodeSandbox.Manager.Endpoints;
 using DonkeyWork.CodeSandbox.Manager.Services.Background;
 using DonkeyWork.CodeSandbox.Manager.Services.Container;
+using DonkeyWork.CodeSandbox.Manager.Services.Mcp;
 using DonkeyWork.CodeSandbox.Manager.Services.Pool;
 using DonkeyWork.CodeSandbox.Manager.Services.Terminal;
 using k8s;
@@ -73,6 +74,7 @@ builder.Services.AddHttpClient();
 builder.Services.AddScoped<IKataContainerService, KataContainerService>();
 builder.Services.AddScoped<IPoolManager, PoolManager>();
 builder.Services.AddScoped<ITerminalService, TerminalService>();
+builder.Services.AddScoped<IMcpContainerService, McpContainerService>();
 
 // Register background services
 builder.Services.AddHostedService<ContainerCleanupService>();
@@ -118,6 +120,7 @@ app.MapHealthChecks("/healthz");
 
 // Map endpoints
 app.MapKataContainerEndpoints();
+app.MapMcpServerEndpoints();
 
 Log.Information("Kata Container Manager API started successfully");
 await app.RunAsync();

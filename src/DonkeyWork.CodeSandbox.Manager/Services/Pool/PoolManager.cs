@@ -23,6 +23,14 @@ public class PoolManager : IPoolManager
     private const string AllocatedToLabel = "allocated-to";
     private const string ManagerIdLabel = "manager-id";
 
+    // Container type labels
+    internal const string ContainerTypeLabel = "container-type";
+    internal const string ContainerTypeSandbox = "sandbox";
+    internal const string ContainerTypeMcp = "mcp-server";
+
+    // Annotation for storing MCP launch command
+    internal const string McpLaunchCommandAnnotation = "codesandbox.donkeywork.dev/mcp-launch-command";
+
     // Annotations for timestamps (source of truth for time-based data)
     internal const string CreatedAtAnnotation = "codesandbox.donkeywork.dev/created-at";
     internal const string AllocatedAtAnnotation = "codesandbox.donkeywork.dev/allocated-at";
@@ -46,10 +54,10 @@ public class PoolManager : IPoolManager
         {
             try
             {
-                // Find warm pods
+                // Find warm sandbox pods (not MCP)
                 var warmPods = await _client.CoreV1.ListNamespacedPodAsync(
                     _config.TargetNamespace,
-                    labelSelector: $"{PoolStatusLabel}={PoolStatusWarm}",
+                    labelSelector: $"{PoolStatusLabel}={PoolStatusWarm},{ContainerTypeLabel}={ContainerTypeSandbox}",
                     cancellationToken: cancellationToken);
 
                 if (!warmPods.Items.Any())
@@ -120,7 +128,7 @@ public class PoolManager : IPoolManager
         {
             var warmPods = await _client.CoreV1.ListNamespacedPodAsync(
                 _config.TargetNamespace,
-                labelSelector: $"{PoolStatusLabel}={PoolStatusWarm}",
+                labelSelector: $"{PoolStatusLabel}={PoolStatusWarm},{ContainerTypeLabel}={ContainerTypeSandbox}",
                 cancellationToken: cancellationToken);
 
             return warmPods.Items.Count;
@@ -138,7 +146,7 @@ public class PoolManager : IPoolManager
         {
             var allocatedPods = await _client.CoreV1.ListNamespacedPodAsync(
                 _config.TargetNamespace,
-                labelSelector: $"{PoolStatusLabel}={PoolStatusAllocated}",
+                labelSelector: $"{PoolStatusLabel}={PoolStatusAllocated},{ContainerTypeLabel}={ContainerTypeSandbox}",
                 cancellationToken: cancellationToken);
 
             return allocatedPods.Items.Count;
@@ -156,7 +164,7 @@ public class PoolManager : IPoolManager
         {
             var creatingPods = await _client.CoreV1.ListNamespacedPodAsync(
                 _config.TargetNamespace,
-                labelSelector: $"{PoolStatusLabel}={PoolStatusCreating}",
+                labelSelector: $"{PoolStatusLabel}={PoolStatusCreating},{ContainerTypeLabel}={ContainerTypeSandbox}",
                 cancellationToken: cancellationToken);
 
             return creatingPods.Items.Count;
@@ -174,7 +182,7 @@ public class PoolManager : IPoolManager
         {
             var manualPods = await _client.CoreV1.ListNamespacedPodAsync(
                 _config.TargetNamespace,
-                labelSelector: $"{PoolStatusLabel}={PoolStatusManual}",
+                labelSelector: $"{PoolStatusLabel}={PoolStatusManual},{ContainerTypeLabel}={ContainerTypeSandbox}",
                 cancellationToken: cancellationToken);
 
             return manualPods.Items.Count;
@@ -265,74 +273,98 @@ public class PoolManager : IPoolManager
 
     public async Task BackfillPoolAsync(CancellationToken cancellationToken = default)
     {
+        // Get total container count to enforce max limit (shared across both pool types)
+        var totalContainers = await GetTotalContainerCountAsync(cancellationToken);
+
+        // Backfill sandbox pool
+        await BackfillPoolForTypeAsync(
+            ContainerTypeSandbox,
+            _config.WarmPoolSize,
+            totalContainers,
+            cancellationToken);
+
+        // Re-count after sandbox backfill
+        totalContainers = await GetTotalContainerCountAsync(cancellationToken);
+
+        // Backfill MCP pool
+        if (_config.McpWarmPoolSize > 0)
+        {
+            await BackfillPoolForTypeAsync(
+                ContainerTypeMcp,
+                _config.McpWarmPoolSize,
+                totalContainers,
+                cancellationToken);
+        }
+    }
+
+    private async Task BackfillPoolForTypeAsync(
+        string containerType, int targetSize, int totalContainers,
+        CancellationToken cancellationToken)
+    {
+        var typeLabel = containerType == ContainerTypeMcp ? "MCP" : "sandbox";
+
         try
         {
-            // Count all pods in pipeline (creating, warm)
             var creatingPods = await _client.CoreV1.ListNamespacedPodAsync(
                 _config.TargetNamespace,
-                labelSelector: $"{PoolStatusLabel}={PoolStatusCreating}",
+                labelSelector: $"{PoolStatusLabel}={PoolStatusCreating},{ContainerTypeLabel}={containerType}",
                 cancellationToken: cancellationToken);
 
             var warmPods = await _client.CoreV1.ListNamespacedPodAsync(
                 _config.TargetNamespace,
-                labelSelector: $"{PoolStatusLabel}={PoolStatusWarm}",
+                labelSelector: $"{PoolStatusLabel}={PoolStatusWarm},{ContainerTypeLabel}={containerType}",
                 cancellationToken: cancellationToken);
-
-            // Get total container count to enforce max limit
-            var totalContainers = await GetTotalContainerCountAsync(cancellationToken);
 
             var totalInPipeline = creatingPods.Items.Count + warmPods.Items.Count;
 
             _logger.LogInformation(
-                "Pool status: {Creating} creating, {Warm} warm, {Target} target, {Total} in pipeline, {TotalContainers}/{MaxContainers} total",
+                "{Type} pool status: {Creating} creating, {Warm} warm, {Target} target, {Total} in pipeline, {TotalContainers}/{MaxContainers} total",
+                typeLabel,
                 creatingPods.Items.Count,
                 warmPods.Items.Count,
-                _config.WarmPoolSize,
+                targetSize,
                 totalInPipeline,
                 totalContainers,
                 _config.MaxTotalContainers);
 
-            if (totalInPipeline >= _config.WarmPoolSize)
+            if (totalInPipeline >= targetSize)
             {
-                _logger.LogDebug("Pool is full, no backfill needed");
+                _logger.LogDebug("{Type} pool is full, no backfill needed", typeLabel);
                 return;
             }
 
-            var deficit = _config.WarmPoolSize - totalInPipeline;
-
-            // Respect max container limit - don't create more than allowed
+            var deficit = targetSize - totalInPipeline;
             var availableCapacity = _config.MaxTotalContainers - totalContainers;
             if (availableCapacity <= 0)
             {
-                _logger.LogWarning("Max container limit reached ({Max}), cannot backfill pool",
-                    _config.MaxTotalContainers);
+                _logger.LogWarning("Max container limit reached ({Max}), cannot backfill {Type} pool",
+                    _config.MaxTotalContainers, typeLabel);
                 return;
             }
 
-            // Only create up to available capacity
             var toCreate = Math.Min(deficit, availableCapacity);
             if (toCreate < deficit)
             {
-                _logger.LogWarning("Limiting backfill to {ToCreate} (requested {Deficit}) due to max container limit",
-                    toCreate, deficit);
+                _logger.LogWarning("Limiting {Type} backfill to {ToCreate} (requested {Deficit}) due to max container limit",
+                    typeLabel, toCreate, deficit);
             }
 
-            _logger.LogInformation("Pool deficit: {Deficit}, creating {ToCreate} new warm sandboxes", deficit, toCreate);
+            _logger.LogInformation("{Type} pool deficit: {Deficit}, creating {ToCreate} new warm containers",
+                typeLabel, deficit, toCreate);
 
-            // Create pods to fill the deficit
             var tasks = new List<Task>();
             for (int i = 0; i < toCreate; i++)
             {
-                tasks.Add(CreateWarmSandboxAsync(cancellationToken));
+                tasks.Add(CreateWarmContainerAsync(containerType, cancellationToken));
             }
 
             await Task.WhenAll(tasks);
 
-            _logger.LogInformation("Backfill completed, created {Count} new warm sandboxes", toCreate);
+            _logger.LogInformation("{Type} backfill completed, created {Count} containers", typeLabel, toCreate);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error during pool backfill");
+            _logger.LogError(ex, "Error during {Type} pool backfill", typeLabel);
         }
     }
 
@@ -401,25 +433,27 @@ public class PoolManager : IPoolManager
         }
     }
 
-    private async Task CreateWarmSandboxAsync(CancellationToken cancellationToken)
+    private async Task CreateWarmContainerAsync(string containerType, CancellationToken cancellationToken)
     {
+        var isMcp = containerType == ContainerTypeMcp;
+        var prefix = isMcp ? _config.McpPodNamePrefix : _config.PodNamePrefix;
         var uniqueId = Guid.NewGuid().ToString("N")[..8];
-        var podName = $"{_config.PodNamePrefix}-warm-{uniqueId}";
+        var podName = $"{prefix}-warm-{uniqueId}";
+        var typeLabel = isMcp ? "MCP" : "sandbox";
 
         try
         {
-            var pod = BuildWarmPodSpec(podName);
+            var pod = BuildWarmPodSpec(podName, containerType);
 
-            _logger.LogInformation("Creating warm sandbox {PodName}", podName);
+            _logger.LogInformation("Creating warm {Type} {PodName}", typeLabel, podName);
 
             var createdPod = await _client.CoreV1.CreateNamespacedPodAsync(
                 pod,
                 _config.TargetNamespace,
                 cancellationToken: cancellationToken);
 
-            _logger.LogInformation("Warm sandbox {PodName} created, waiting for ready state", podName);
+            _logger.LogInformation("Warm {Type} {PodName} created, waiting for ready state", typeLabel, podName);
 
-            // Start background task to monitor this pod and update its status to "warm" when ready
             _ = Task.Run(async () => await MonitorPodReadinessAsync(podName, cancellationToken), cancellationToken);
         }
         catch (HttpOperationException ex) when (ex.Response.StatusCode == HttpStatusCode.Conflict)
@@ -428,7 +462,7 @@ public class PoolManager : IPoolManager
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to create warm sandbox {PodName}", podName);
+            _logger.LogError(ex, "Failed to create warm {Type} {PodName}", typeLabel, podName);
         }
     }
 
@@ -516,16 +550,20 @@ public class PoolManager : IPoolManager
         return "Unknown";
     }
 
-    private V1Pod BuildWarmPodSpec(string podName)
+    private V1Pod BuildWarmPodSpec(string podName, string containerType = ContainerTypeSandbox)
     {
         var managerId = Environment.MachineName;
         var nowTimestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString();
+
+        var isMcp = containerType == ContainerTypeMcp;
+        var image = isMcp ? _config.McpServerImage : _config.DefaultImage;
 
         var labels = new Dictionary<string, string>
         {
             ["app"] = "kata-manager",
             ["runtime"] = "kata",
             ["managed-by"] = "CodeSandbox-Manager",
+            [ContainerTypeLabel] = containerType,
             [PoolStatusLabel] = PoolStatusCreating,  // Start as "creating"
             [ManagerIdLabel] = managerId
         };
@@ -537,12 +575,15 @@ public class PoolManager : IPoolManager
             [LastActivityAnnotation] = nowTimestamp
         };
 
+        var resourceRequests = isMcp && _config.McpResourceRequests != null ? _config.McpResourceRequests : _config.DefaultResourceRequests;
+        var resourceLimits = isMcp && _config.McpResourceLimits != null ? _config.McpResourceLimits : _config.DefaultResourceLimits;
+
         var container = new V1Container
         {
             Name = "workload",
-            Image = _config.DefaultImage,
+            Image = image,
             ImagePullPolicy = "Always",
-            Resources = BuildResourceRequirements(),
+            Resources = BuildResourceRequirements(resourceRequests, resourceLimits),
             Stdin = true,
             Tty = true
         };
@@ -567,18 +608,23 @@ public class PoolManager : IPoolManager
         return pod;
     }
 
-    private V1ResourceRequirements BuildResourceRequirements()
+    private V1ResourceRequirements BuildResourceRequirements(
+        ResourceConfig? requestConfig = null,
+        ResourceConfig? limitConfig = null)
     {
+        var reqConfig = requestConfig ?? _config.DefaultResourceRequests;
+        var limConfig = limitConfig ?? _config.DefaultResourceLimits;
+
         var requests = new Dictionary<string, ResourceQuantity>
         {
-            ["memory"] = new ResourceQuantity($"{_config.DefaultResourceRequests.MemoryMi}Mi"),
-            ["cpu"] = new ResourceQuantity($"{_config.DefaultResourceRequests.CpuMillicores}m")
+            ["memory"] = new ResourceQuantity($"{reqConfig.MemoryMi}Mi"),
+            ["cpu"] = new ResourceQuantity($"{reqConfig.CpuMillicores}m")
         };
 
         var limits = new Dictionary<string, ResourceQuantity>
         {
-            ["memory"] = new ResourceQuantity($"{_config.DefaultResourceLimits.MemoryMi}Mi"),
-            ["cpu"] = new ResourceQuantity($"{_config.DefaultResourceLimits.CpuMillicores}m")
+            ["memory"] = new ResourceQuantity($"{limConfig.MemoryMi}Mi"),
+            ["cpu"] = new ResourceQuantity($"{limConfig.CpuMillicores}m")
         };
 
         return new V1ResourceRequirements

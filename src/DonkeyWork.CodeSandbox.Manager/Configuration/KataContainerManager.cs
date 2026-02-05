@@ -52,6 +52,27 @@ public class KataContainerManager
     [Range(5, 60, ErrorMessage = "Lease duration must be between 5 and 60 seconds")]
     public int LeaderLeaseDurationSeconds { get; set; } = 15;
 
+    // MCP Server settings
+    [Required]
+    public string McpServerImage { get; set; } = "ghcr.io/andyjmorgan/donkeywork-codesandbox-mcpserver:latest";
+
+    [Required]
+    [RegularExpression(@"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$", ErrorMessage = "Invalid MCP pod name prefix")]
+    public string McpPodNamePrefix { get; set; } = "kata-mcp";
+
+    [Range(0, 100, ErrorMessage = "MCP warm pool size must be between 0 and 100")]
+    public int McpWarmPoolSize { get; set; } = 5;
+
+    [Range(1, 1440, ErrorMessage = "MCP idle timeout must be between 1 and 1440 minutes")]
+    public int McpIdleTimeoutMinutes { get; set; } = 60;
+
+    [Range(1, 1440, ErrorMessage = "MCP max container lifetime must be between 1 and 1440 minutes")]
+    public int McpMaxContainerLifetimeMinutes { get; set; } = 480;
+
+    // Optional separate resource config for MCP servers (falls back to Default if null)
+    public ResourceConfig? McpResourceRequests { get; set; }
+    public ResourceConfig? McpResourceLimits { get; set; }
+
     // Optional: Direct k8s connection (alternative to kubeconfig)
     public KubernetesConnectionConfig? Connection { get; set; }
 }
