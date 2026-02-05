@@ -115,6 +115,7 @@ jobs:
       tag: ${{ steps.semver.outputs.tag }}
       manager-changed: ${{ steps.changes.outputs.manager }}
       executor-changed: ${{ steps.changes.outputs.executor }}
+      mcp-server-changed: ${{ steps.changes.outputs.mcp-server }}
       frontend-changed: ${{ steps.changes.outputs.frontend }}
     steps:
       - uses: actions/checkout@v4
@@ -153,6 +154,10 @@ jobs:
               - 'src/DonkeyWork.CodeSandbox.Contracts/**'
               - 'Directory.Packages.props'
               - '*.sln'
+            mcp-server:
+              - 'src/DonkeyWork.CodeSandbox.McpServer/**'
+              - 'Directory.Packages.props'
+              - '*.sln'
             frontend:
               - 'frontend/**'
 
@@ -178,6 +183,13 @@ jobs:
             title: DonkeyWork CodeSandbox Server
             description: HTTP+SSE server for executing bash commands with Python and Node.js support
             changed: executor-changed
+          - component: mcp-server
+            image: donkeywork-codesandbox-mcp-server
+            dockerfile: ./src/DonkeyWork.CodeSandbox.McpServer/Dockerfile
+            context: .
+            title: DonkeyWork CodeSandbox MCP Server
+            description: MCP bridge server for AI agent integration
+            changed: mcp-server-changed
           - component: frontend
             image: donkeywork-codesandbox-frontend
             dockerfile: ./frontend/Dockerfile
@@ -287,6 +299,7 @@ jobs:
           VERSION: ${{ needs.prepare-release.outputs.version }}
           MANAGER_CHANGED: ${{ needs.prepare-release.outputs.manager-changed }}
           EXECUTOR_CHANGED: ${{ needs.prepare-release.outputs.executor-changed }}
+          MCP_SERVER_CHANGED: ${{ needs.prepare-release.outputs.mcp-server-changed }}
           FRONTEND_CHANGED: ${{ needs.prepare-release.outputs.frontend-changed }}
         run: |
           PREVIOUS_TAG=$(git describe --abbrev=0 --tags 2>/dev/null || echo "")
@@ -303,6 +316,7 @@ jobs:
 
           [ "$MANAGER_CHANGED" == "true" ] && echo -e "### Manager API\n\`\`\`bash\ndocker pull ${{ env.REGISTRY }}/${{ github.repository_owner }}/donkeywork-codesandbox-manager:${VERSION}\n\`\`\`\n" >> CHANGELOG.md
           [ "$EXECUTOR_CHANGED" == "true" ] && echo -e "### Executor API\n\`\`\`bash\ndocker pull ${{ env.REGISTRY }}/${{ github.repository_owner }}/donkeywork-codesandbox-executor:${VERSION}\n\`\`\`\n" >> CHANGELOG.md
+          [ "$MCP_SERVER_CHANGED" == "true" ] && echo -e "### MCP Server\n\`\`\`bash\ndocker pull ${{ env.REGISTRY }}/${{ github.repository_owner }}/donkeywork-codesandbox-mcp-server:${VERSION}\n\`\`\`\n" >> CHANGELOG.md
           [ "$FRONTEND_CHANGED" == "true" ] && echo -e "### Frontend\n\`\`\`bash\ndocker pull ${{ env.REGISTRY }}/${{ github.repository_owner }}/donkeywork-codesandbox-frontend:${VERSION}\n\`\`\`\n" >> CHANGELOG.md
 
           echo "**Platforms:** linux/amd64, linux/arm64" >> CHANGELOG.md
@@ -329,6 +343,7 @@ jobs:
           VERSION: ${{ needs.prepare-release.outputs.version }}
           MANAGER_CHANGED: ${{ needs.prepare-release.outputs.manager-changed }}
           EXECUTOR_CHANGED: ${{ needs.prepare-release.outputs.executor-changed }}
+          MCP_SERVER_CHANGED: ${{ needs.prepare-release.outputs.mcp-server-changed }}
           FRONTEND_CHANGED: ${{ needs.prepare-release.outputs.frontend-changed }}
         run: |
           echo "# Release Summary" >> $GITHUB_STEP_SUMMARY
@@ -338,6 +353,7 @@ jobs:
           echo "|-----------|---------|--------|" >> $GITHUB_STEP_SUMMARY
           echo "| Manager | ${MANAGER_CHANGED} | ${{ needs.docker-build.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Executor | ${EXECUTOR_CHANGED} | ${{ needs.docker-build.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| MCP Server | ${MCP_SERVER_CHANGED} | ${{ needs.docker-build.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Frontend | ${FRONTEND_CHANGED} | ${{ needs.docker-build.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| GitHub Release | - | ${{ needs.create-release.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -345,5 +361,6 @@ jobs:
           echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
           [ "$MANAGER_CHANGED" == "true" ] && echo "docker pull ${{ env.REGISTRY }}/${{ github.repository_owner }}/donkeywork-codesandbox-manager:${VERSION}" >> $GITHUB_STEP_SUMMARY
           [ "$EXECUTOR_CHANGED" == "true" ] && echo "docker pull ${{ env.REGISTRY }}/${{ github.repository_owner }}/donkeywork-codesandbox-executor:${VERSION}" >> $GITHUB_STEP_SUMMARY
+          [ "$MCP_SERVER_CHANGED" == "true" ] && echo "docker pull ${{ env.REGISTRY }}/${{ github.repository_owner }}/donkeywork-codesandbox-mcp-server:${VERSION}" >> $GITHUB_STEP_SUMMARY
           [ "$FRONTEND_CHANGED" == "true" ] && echo "docker pull ${{ env.REGISTRY }}/${{ github.repository_owner }}/donkeywork-codesandbox-frontend:${VERSION}" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
