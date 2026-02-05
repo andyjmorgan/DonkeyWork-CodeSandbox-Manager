@@ -2,8 +2,7 @@ name: Release
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
     paths:
       - 'src/**'
       - 'test/**'
@@ -32,17 +31,31 @@ jobs:
   build-and-test:
     name: Build and Test
     runs-on: self-hosted
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Configure NuGet for self-hosted runner
+        run: |
+          cat > nuget.config << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <configuration>
+            <packageSources>
+              <clear />
+              <add key="nexus" value="http://nexus.nexus.svc.cluster.local:8081/repository/nuget.org-proxy/index.json" allowInsecureConnections="true" />
+            </packageSources>
+          </configuration>
+          EOF
+
+      - name: Pre-build Docker images for integration tests
+        run: |
+          docker build --network=host -f src/DonkeyWork.CodeSandbox.Server/Dockerfile -t donkeywork-codesandbox-server:test .
+          docker build --network=host -f src/DonkeyWork.CodeSandbox.McpServer/Dockerfile -t donkeywork-codesandbox-mcpserver:test .
 
       - name: Restore dependencies
         run: dotnet restore DonkeyWork.CodeSandbox.sln
@@ -59,9 +72,10 @@ jobs:
             --logger "trx;LogFileName=test-results.trx" \
             --collect:"XPlat Code Coverage" \
             --results-directory ./TestResults
+        env:
+          TESTCONTAINERS_RYUK_DISABLED: true
 
-      - name: Upload test results
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: test-results
@@ -71,13 +85,10 @@ jobs:
   frontend-build:
     name: Frontend Build and Lint
     runs-on: self-hosted
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
@@ -95,17 +106,18 @@ jobs:
         working-directory: frontend
         run: npm run build
 
-  semantic-version:
-    name: Determine Version
+  prepare-release:
+    name: Prepare Release
     runs-on: self-hosted
     needs: [build-and-test, frontend-build]
     outputs:
       version: ${{ steps.semver.outputs.version }}
       tag: ${{ steps.semver.outputs.tag }}
-
+      manager-changed: ${{ steps.changes.outputs.manager }}
+      executor-changed: ${{ steps.changes.outputs.executor }}
+      frontend-changed: ${{ steps.changes.outputs.frontend }}
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
@@ -121,28 +133,11 @@ jobs:
       - name: Set semantic version
         id: semver
         run: |
-          VERSION="${{ steps.gitversion.outputs.semVer }}"
-          TAG="v${VERSION}"
-          echo "version=${VERSION}" >> $GITHUB_OUTPUT
-          echo "tag=${TAG}" >> $GITHUB_OUTPUT
-          echo "Determined version: ${VERSION}, Tag: ${TAG}"
+          echo "version=${{ steps.gitversion.outputs.semVer }}" >> $GITHUB_OUTPUT
+          echo "tag=v${{ steps.gitversion.outputs.semVer }}" >> $GITHUB_OUTPUT
 
-  detect-changes:
-    name: Detect Changes
-    runs-on: self-hosted
-    outputs:
-      manager: ${{ steps.filter.outputs.manager }}
-      executor: ${{ steps.filter.outputs.executor }}
-      frontend: ${{ steps.filter.outputs.frontend }}
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Get changed files
-        id: filter
+      - name: Detect changes
+        id: changes
         uses: dorny/paths-filter@v3
         with:
           filters: |
@@ -161,31 +156,67 @@ jobs:
             frontend:
               - 'frontend/**'
 
-      - name: Log detected changes
-        run: |
-          echo "Manager changed: ${{ steps.filter.outputs.manager }}"
-          echo "Executor changed: ${{ steps.filter.outputs.executor }}"
-          echo "Frontend changed: ${{ steps.filter.outputs.frontend }}"
-
-  docker-build-manager:
-    name: Build and Push Manager
+  docker-build:
+    name: Build ${{ matrix.component }}
     runs-on: self-hosted
-    needs: [build-and-test, semantic-version, detect-changes]
-    if: needs.detect-changes.outputs.manager == 'true'
-    outputs:
-      digest: ${{ steps.build.outputs.digest }}
-
+    needs: [prepare-release]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - component: manager
+            image: donkeywork-codesandbox-manager
+            dockerfile: ./Dockerfile
+            context: .
+            title: Kata Container Manager
+            description: REST API for managing Kata containers in Kubernetes
+            changed: manager-changed
+          - component: executor
+            image: donkeywork-codesandbox-executor
+            dockerfile: ./src/DonkeyWork.CodeSandbox.Server/Dockerfile
+            context: .
+            title: DonkeyWork CodeSandbox Server
+            description: HTTP+SSE server for executing bash commands with Python and Node.js support
+            changed: executor-changed
+          - component: frontend
+            image: donkeywork-codesandbox-frontend
+            dockerfile: ./frontend/Dockerfile
+            context: ./frontend
+            title: DonkeyWork CodeSandbox Frontend
+            description: Web UI for managing Kata sandbox containers
+            changed: frontend-changed
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - name: Check if build needed
+        id: check
+        run: |
+          CHANGED="${{ needs.prepare-release.outputs[matrix.changed] }}"
+          echo "should-build=${CHANGED}" >> $GITHUB_OUTPUT
+          echo "Component ${{ matrix.component }} changed: ${CHANGED}"
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+      - uses: actions/checkout@v4
+        if: steps.check.outputs.should-build == 'true'
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - name: Configure NuGet for self-hosted runner
+        if: steps.check.outputs.should-build == 'true' && matrix.component != 'frontend'
+        run: |
+          cat > nuget.config << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <configuration>
+            <packageSources>
+              <clear />
+              <add key="nexus" value="http://nexus.nexus.svc.cluster.local:8081/repository/nuget.org-proxy/index.json" allowInsecureConnections="true" />
+            </packageSources>
+          </configuration>
+          EOF
+
+      - uses: docker/setup-qemu-action@v3
+        if: steps.check.outputs.should-build == 'true'
+
+      - uses: docker/setup-buildx-action@v3
+        if: steps.check.outputs.should-build == 'true'
 
       - name: Log in to GitHub Container Registry
+        if: steps.check.outputs.should-build == 'true'
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
@@ -193,237 +224,94 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Extract metadata
+        if: steps.check.outputs.should-build == 'true'
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/donkeywork-codesandbox-manager
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}
           tags: |
-            type=semver,pattern={{version}},value=${{ needs.semantic-version.outputs.version }}
-            type=semver,pattern={{major}}.{{minor}},value=${{ needs.semantic-version.outputs.version }}
-            type=semver,pattern={{major}},value=${{ needs.semantic-version.outputs.version }}
+            type=semver,pattern={{version}},value=${{ needs.prepare-release.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ needs.prepare-release.outputs.version }}
+            type=semver,pattern={{major}},value=${{ needs.prepare-release.outputs.version }}
             type=sha,prefix={{branch}}-
             type=raw,value=latest,enable={{is_default_branch}}
           labels: |
-            org.opencontainers.image.title=Kata Container Manager
-            org.opencontainers.image.description=REST API for managing Kata containers in Kubernetes
+            org.opencontainers.image.title=${{ matrix.title }}
+            org.opencontainers.image.description=${{ matrix.description }}
             org.opencontainers.image.vendor=DonkeyWork
-            org.opencontainers.image.version=${{ needs.semantic-version.outputs.version }}
+            org.opencontainers.image.version=${{ needs.prepare-release.outputs.version }}
 
       - name: Build and push Docker image
+        if: steps.check.outputs.should-build == 'true'
         id: build
         uses: docker/build-push-action@v5
         with:
-          context: .
-          file: ./Dockerfile
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=manager
-          cache-to: type=gha,mode=max,scope=manager
+          cache-from: type=gha,scope=${{ matrix.component }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.component }}
           platforms: linux/amd64,linux/arm64
+          network: host
           provenance: true
           sbom: true
 
       - name: Generate summary
+        if: steps.check.outputs.should-build == 'true'
         run: |
-          echo "## Kata Container Manager Published" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Image:** \`${{ env.REGISTRY }}/${{ github.repository_owner }}/donkeywork-codesandbox-manager\`" >> $GITHUB_STEP_SUMMARY
-          echo "**Version:** \`${{ needs.semantic-version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "## ${{ matrix.title }} Published" >> $GITHUB_STEP_SUMMARY
+          echo "**Image:** \`${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** \`${{ needs.prepare-release.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
           echo "**Digest:** \`${{ steps.build.outputs.digest }}\`" >> $GITHUB_STEP_SUMMARY
 
-  docker-build-executor:
-    name: Build and Push Executor
-    runs-on: self-hosted
-    needs: [build-and-test, semantic-version, detect-changes]
-    if: needs.detect-changes.outputs.executor == 'true'
-    outputs:
-      digest: ${{ steps.build.outputs.digest }}
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/donkeywork-codesandbox-executor
-          tags: |
-            type=semver,pattern={{version}},value=${{ needs.semantic-version.outputs.version }}
-            type=semver,pattern={{major}}.{{minor}},value=${{ needs.semantic-version.outputs.version }}
-            type=semver,pattern={{major}},value=${{ needs.semantic-version.outputs.version }}
-            type=sha,prefix={{branch}}-
-            type=raw,value=latest,enable={{is_default_branch}}
-          labels: |
-            org.opencontainers.image.title=DonkeyWork CodeSandbox Server
-            org.opencontainers.image.description=HTTP+SSE server for executing bash commands with Python and Node.js support
-            org.opencontainers.image.vendor=DonkeyWork
-            org.opencontainers.image.version=${{ needs.semantic-version.outputs.version }}
-
-      - name: Build and push Docker image
-        id: build
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./src/DonkeyWork.CodeSandbox.Server/Dockerfile
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=executor
-          cache-to: type=gha,mode=max,scope=executor
-          platforms: linux/amd64,linux/arm64
-          provenance: true
-          sbom: true
-
-      - name: Generate summary
+      - name: Skip summary
+        if: steps.check.outputs.should-build != 'true'
         run: |
-          echo "## DonkeyWork CodeSandbox Executor Published" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Image:** \`${{ env.REGISTRY }}/${{ github.repository_owner }}/donkeywork-codesandbox-executor\`" >> $GITHUB_STEP_SUMMARY
-          echo "**Version:** \`${{ needs.semantic-version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "**Digest:** \`${{ steps.build.outputs.digest }}\`" >> $GITHUB_STEP_SUMMARY
-
-  docker-build-frontend:
-    name: Build and Push Frontend
-    runs-on: self-hosted
-    needs: [frontend-build, semantic-version, detect-changes]
-    if: needs.detect-changes.outputs.frontend == 'true'
-    outputs:
-      digest: ${{ steps.build.outputs.digest }}
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/donkeywork-codesandbox-frontend
-          tags: |
-            type=semver,pattern={{version}},value=${{ needs.semantic-version.outputs.version }}
-            type=semver,pattern={{major}}.{{minor}},value=${{ needs.semantic-version.outputs.version }}
-            type=semver,pattern={{major}},value=${{ needs.semantic-version.outputs.version }}
-            type=sha,prefix={{branch}}-
-            type=raw,value=latest,enable={{is_default_branch}}
-          labels: |
-            org.opencontainers.image.title=DonkeyWork CodeSandbox Frontend
-            org.opencontainers.image.description=Web UI for managing Kata sandbox containers
-            org.opencontainers.image.vendor=DonkeyWork
-            org.opencontainers.image.version=${{ needs.semantic-version.outputs.version }}
-
-      - name: Build and push Docker image
-        id: build
-        uses: docker/build-push-action@v5
-        with:
-          context: ./frontend
-          file: ./frontend/Dockerfile
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=frontend
-          cache-to: type=gha,mode=max,scope=frontend
-          platforms: linux/amd64,linux/arm64
-          provenance: true
-          sbom: true
-
-      - name: Generate summary
-        run: |
-          echo "## DonkeyWork CodeSandbox Frontend Published" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Image:** \`${{ env.REGISTRY }}/${{ github.repository_owner }}/donkeywork-codesandbox-frontend\`" >> $GITHUB_STEP_SUMMARY
-          echo "**Version:** \`${{ needs.semantic-version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "**Digest:** \`${{ steps.build.outputs.digest }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "## ${{ matrix.title }} Skipped" >> $GITHUB_STEP_SUMMARY
+          echo "No changes detected for this component." >> $GITHUB_STEP_SUMMARY
 
   create-release:
     name: Create GitHub Release
     runs-on: self-hosted
-    needs: [semantic-version, detect-changes, docker-build-manager, docker-build-executor, docker-build-frontend]
-    if: always() && needs.semantic-version.result == 'success' && (needs.docker-build-manager.result == 'success' || needs.docker-build-manager.result == 'skipped') && (needs.docker-build-executor.result == 'success' || needs.docker-build-executor.result == 'skipped') && (needs.docker-build-frontend.result == 'success' || needs.docker-build-frontend.result == 'skipped')
-
+    needs: [prepare-release, docker-build]
+    if: always() && needs.prepare-release.result == 'success' && needs.docker-build.result != 'failure'
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Generate changelog
+        env:
+          VERSION: ${{ needs.prepare-release.outputs.version }}
+          MANAGER_CHANGED: ${{ needs.prepare-release.outputs.manager-changed }}
+          EXECUTOR_CHANGED: ${{ needs.prepare-release.outputs.executor-changed }}
+          FRONTEND_CHANGED: ${{ needs.prepare-release.outputs.frontend-changed }}
         run: |
           PREVIOUS_TAG=$(git describe --abbrev=0 --tags 2>/dev/null || echo "")
 
           if [ -z "$PREVIOUS_TAG" ]; then
             echo "## Initial Release" > CHANGELOG.md
-            echo "" >> CHANGELOG.md
             echo "First unified release of DonkeyWork CodeSandbox monorepo." >> CHANGELOG.md
           else
             echo "## What's Changed" > CHANGELOG.md
-            echo "" >> CHANGELOG.md
             git log ${PREVIOUS_TAG}..HEAD --pretty=format:"* %s (%h)" --no-merges >> CHANGELOG.md
           fi
 
-          echo "" >> CHANGELOG.md
-          echo "" >> CHANGELOG.md
-          echo "## Docker Images Updated" >> CHANGELOG.md
-          echo "" >> CHANGELOG.md
+          echo -e "\n\n## Docker Images Updated\n" >> CHANGELOG.md
 
-          if [ "${{ needs.detect-changes.outputs.manager }}" == "true" ]; then
-            echo "### Manager API" >> CHANGELOG.md
-            echo "\`\`\`bash" >> CHANGELOG.md
-            echo "docker pull ${{ env.REGISTRY }}/${{ github.repository_owner }}/donkeywork-codesandbox-manager:${{ needs.semantic-version.outputs.version }}" >> CHANGELOG.md
-            echo "\`\`\`" >> CHANGELOG.md
-            echo "" >> CHANGELOG.md
-          fi
-
-          if [ "${{ needs.detect-changes.outputs.executor }}" == "true" ]; then
-            echo "### Executor API" >> CHANGELOG.md
-            echo "\`\`\`bash" >> CHANGELOG.md
-            echo "docker pull ${{ env.REGISTRY }}/${{ github.repository_owner }}/donkeywork-codesandbox-executor:${{ needs.semantic-version.outputs.version }}" >> CHANGELOG.md
-            echo "\`\`\`" >> CHANGELOG.md
-            echo "" >> CHANGELOG.md
-          fi
-
-          if [ "${{ needs.detect-changes.outputs.frontend }}" == "true" ]; then
-            echo "### Frontend" >> CHANGELOG.md
-            echo "\`\`\`bash" >> CHANGELOG.md
-            echo "docker pull ${{ env.REGISTRY }}/${{ github.repository_owner }}/donkeywork-codesandbox-frontend:${{ needs.semantic-version.outputs.version }}" >> CHANGELOG.md
-            echo "\`\`\`" >> CHANGELOG.md
-            echo "" >> CHANGELOG.md
-          fi
+          [ "$MANAGER_CHANGED" == "true" ] && echo -e "### Manager API\n\`\`\`bash\ndocker pull ${{ env.REGISTRY }}/${{ github.repository_owner }}/donkeywork-codesandbox-manager:${VERSION}\n\`\`\`\n" >> CHANGELOG.md
+          [ "$EXECUTOR_CHANGED" == "true" ] && echo -e "### Executor API\n\`\`\`bash\ndocker pull ${{ env.REGISTRY }}/${{ github.repository_owner }}/donkeywork-codesandbox-executor:${VERSION}\n\`\`\`\n" >> CHANGELOG.md
+          [ "$FRONTEND_CHANGED" == "true" ] && echo -e "### Frontend\n\`\`\`bash\ndocker pull ${{ env.REGISTRY }}/${{ github.repository_owner }}/donkeywork-codesandbox-frontend:${VERSION}\n\`\`\`\n" >> CHANGELOG.md
 
           echo "**Platforms:** linux/amd64, linux/arm64" >> CHANGELOG.md
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ needs.semantic-version.outputs.tag }}
-          name: Release ${{ needs.semantic-version.outputs.version }}
+          tag_name: ${{ needs.prepare-release.outputs.tag }}
+          name: Release ${{ needs.prepare-release.outputs.version }}
           body_path: CHANGELOG.md
           draft: false
           prerelease: false
@@ -433,32 +321,29 @@ jobs:
   release-summary:
     name: Release Summary
     runs-on: self-hosted
-    needs: [semantic-version, detect-changes, docker-build-manager, docker-build-executor, docker-build-frontend, create-release]
+    needs: [prepare-release, docker-build, create-release]
     if: always()
-
     steps:
       - name: Generate summary
+        env:
+          VERSION: ${{ needs.prepare-release.outputs.version }}
+          MANAGER_CHANGED: ${{ needs.prepare-release.outputs.manager-changed }}
+          EXECUTOR_CHANGED: ${{ needs.prepare-release.outputs.executor-changed }}
+          FRONTEND_CHANGED: ${{ needs.prepare-release.outputs.frontend-changed }}
         run: |
           echo "# Release Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## Version: ${{ needs.semantic-version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "## Version: ${VERSION}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Component | Changed | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|-----------|---------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Manager | ${{ needs.detect-changes.outputs.manager }} | ${{ needs.docker-build-manager.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Executor | ${{ needs.detect-changes.outputs.executor }} | ${{ needs.docker-build-executor.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Frontend | ${{ needs.detect-changes.outputs.frontend }} | ${{ needs.docker-build-frontend.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Manager | ${MANAGER_CHANGED} | ${{ needs.docker-build.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Executor | ${EXECUTOR_CHANGED} | ${{ needs.docker-build.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Frontend | ${FRONTEND_CHANGED} | ${{ needs.docker-build.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| GitHub Release | - | ${{ needs.create-release.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Images Built This Release" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
-          if [ "${{ needs.detect-changes.outputs.manager }}" == "true" ]; then
-            echo "docker pull ${{ env.REGISTRY }}/${{ github.repository_owner }}/donkeywork-codesandbox-manager:${{ needs.semantic-version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
-          fi
-          if [ "${{ needs.detect-changes.outputs.executor }}" == "true" ]; then
-            echo "docker pull ${{ env.REGISTRY }}/${{ github.repository_owner }}/donkeywork-codesandbox-executor:${{ needs.semantic-version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
-          fi
-          if [ "${{ needs.detect-changes.outputs.frontend }}" == "true" ]; then
-            echo "docker pull ${{ env.REGISTRY }}/${{ github.repository_owner }}/donkeywork-codesandbox-frontend:${{ needs.semantic-version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
-          fi
+          [ "$MANAGER_CHANGED" == "true" ] && echo "docker pull ${{ env.REGISTRY }}/${{ github.repository_owner }}/donkeywork-codesandbox-manager:${VERSION}" >> $GITHUB_STEP_SUMMARY
+          [ "$EXECUTOR_CHANGED" == "true" ] && echo "docker pull ${{ env.REGISTRY }}/${{ github.repository_owner }}/donkeywork-codesandbox-executor:${VERSION}" >> $GITHUB_STEP_SUMMARY
+          [ "$FRONTEND_CHANGED" == "true" ] && echo "docker pull ${{ env.REGISTRY }}/${{ github.repository_owner }}/donkeywork-codesandbox-frontend:${VERSION}" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
