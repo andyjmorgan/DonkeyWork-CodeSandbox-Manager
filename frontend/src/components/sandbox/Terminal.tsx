@@ -1,3 +1,4 @@
+// Terminal component - interactive shell access to sandbox containers
 import { useEffect, useRef, useCallback, useState } from 'react'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
