@@ -312,7 +312,7 @@ export function McpServerDetail({ serverId, creationInfo, onDelete }: McpServerD
                 <Input
                   value={commandArgs}
                   onChange={(e) => setCommandArgs(e.target.value)}
-                  placeholder="-y @modelcontextprotocol/server-filesystem /home/user"
+                  placeholder="-y @modelcontextprotocol/server-filesystem /home/ubuntu"
                   className="mt-1 font-mono"
                 />
                 <div className="flex flex-wrap gap-2 mt-2">
@@ -322,7 +322,7 @@ export function McpServerDetail({ serverId, creationInfo, onDelete }: McpServerD
                     className="text-xs"
                     onClick={() => {
                       setCommand('npx')
-                      setCommandArgs('-y @modelcontextprotocol/server-filesystem /home/user')
+                      setCommandArgs('-y @modelcontextprotocol/server-filesystem /home/ubuntu')
                     }}
                   >
                     Filesystem
@@ -400,7 +400,15 @@ export function McpServerDetail({ serverId, creationInfo, onDelete }: McpServerD
               rows={4}
             />
             <div className="flex items-center justify-between">
-              <div className="flex gap-2">
+              <div className="flex gap-2 flex-wrap">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="text-xs"
+                  onClick={() => setProxyBody('{\n  "jsonrpc": "2.0",\n  "method": "ping",\n  "id": 1\n}')}
+                >
+                  ping
+                </Button>
                 <Button
                   variant="outline"
                   size="sm"

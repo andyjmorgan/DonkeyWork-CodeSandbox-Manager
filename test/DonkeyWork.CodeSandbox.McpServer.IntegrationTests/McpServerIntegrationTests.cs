@@ -15,7 +15,8 @@ public class McpServerIntegrationTests : IClassFixture<McpServerFixture>
     private readonly McpServerFixture _fixture;
     private readonly HttpClient _client;
 
-    private const string McpLaunchCommand = "npx -y @modelcontextprotocol/server-everything";
+    private const string McpCommand = "npx";
+    private static readonly string[] McpArguments = new[] { "-y", "@modelcontextprotocol/server-everything" };
 
     public McpServerIntegrationTests(McpServerFixture fixture)
     {
@@ -56,7 +57,8 @@ public class McpServerIntegrationTests : IClassFixture<McpServerFixture>
 
         var startRequest = new
         {
-            launchCommand = McpLaunchCommand,
+            command = McpCommand,
+            arguments = McpArguments,
             preExecScripts = Array.Empty<string>()
         };
 
@@ -81,7 +83,8 @@ public class McpServerIntegrationTests : IClassFixture<McpServerFixture>
 
         var startRequest = new
         {
-            launchCommand = McpLaunchCommand,
+            command = McpCommand,
+            arguments = McpArguments,
             preExecScripts = Array.Empty<string>()
         };
 
@@ -103,7 +106,8 @@ public class McpServerIntegrationTests : IClassFixture<McpServerFixture>
 
         var startRequest = new
         {
-            launchCommand = McpLaunchCommand,
+            command = McpCommand,
+            arguments = McpArguments,
             preExecScripts = new[] { "echo 'pre-exec ran successfully'" }
         };
 
@@ -125,7 +129,8 @@ public class McpServerIntegrationTests : IClassFixture<McpServerFixture>
 
         var startRequest = new
         {
-            launchCommand = McpLaunchCommand,
+            command = McpCommand,
+            arguments = McpArguments,
             preExecScripts = new[] { "exit 1" }
         };
 
@@ -417,7 +422,8 @@ public class McpServerIntegrationTests : IClassFixture<McpServerFixture>
 
         var startRequest = new
         {
-            launchCommand = "nonexistent-command-that-does-not-exist",
+            command = "nonexistent-command-that-does-not-exist",
+            arguments = Array.Empty<string>(),
             preExecScripts = Array.Empty<string>()
         };
 
@@ -444,7 +450,8 @@ public class McpServerIntegrationTests : IClassFixture<McpServerFixture>
 
         var startRequest = new
         {
-            launchCommand = McpLaunchCommand,
+            command = McpCommand,
+            arguments = McpArguments,
             preExecScripts = Array.Empty<string>()
         };
 
