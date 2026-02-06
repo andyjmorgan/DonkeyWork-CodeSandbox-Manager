@@ -76,6 +76,10 @@ public class StdioBridge : IDisposable
                 throw new InvalidOperationException($"MCP process exited immediately with code {exitCode}");
             }
 
+            // Wait for the MCP server to be ready by sending an initialize handshake
+            _logger.LogInformation("Waiting for MCP server to respond to initialize handshake...");
+            await WaitForMcpReadyAsync(request.TimeoutSeconds, cancellationToken);
+
             lock (_stateLock)
             {
                 _state = McpServerState.Ready;
@@ -191,6 +195,80 @@ public class StdioBridge : IDisposable
         }
 
         _logger.LogInformation("MCP server stopped");
+    }
+
+    private async Task WaitForMcpReadyAsync(int timeoutSeconds, CancellationToken cancellationToken)
+    {
+        // Send an MCP initialize request to verify the server is ready
+        var initializeRequest = JsonSerializer.Serialize(new
+        {
+            jsonrpc = "2.0",
+            id = "__init_probe__",
+            method = "initialize",
+            @params = new
+            {
+                protocolVersion = "2025-03-26",
+                capabilities = new { },
+                clientInfo = new { name = "readiness-probe", version = "1.0.0" }
+            }
+        });
+
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
+
+        try
+        {
+            // Write the initialize request to stdin
+            await _stdin!.WriteLineAsync(initializeRequest.AsMemory(), timeoutCts.Token);
+            await _stdin.FlushAsync(timeoutCts.Token);
+
+            _logger.LogDebug("Sent initialize probe, waiting for response...");
+
+            // Read response from stdout - wait for valid JSON-RPC response
+            while (true)
+            {
+                if (_mcpProcess is null || _mcpProcess.HasExited)
+                {
+                    throw new InvalidOperationException(
+                        $"MCP process exited during initialization with code {_mcpProcess?.ExitCode ?? -1}");
+                }
+
+                var line = await _stdout!.ReadLineAsync(timeoutCts.Token);
+
+                if (line is null)
+                {
+                    throw new InvalidOperationException("MCP server closed stdout during initialization");
+                }
+
+                if (string.IsNullOrWhiteSpace(line))
+                    continue;
+
+                // Check if this is a valid JSON-RPC response to our initialize request
+                if (IsJsonRpcResponse(line))
+                {
+                    _logger.LogInformation("MCP server responded to initialize probe");
+
+                    // Send the initialized notification to complete the handshake
+                    var initializedNotification = JsonSerializer.Serialize(new
+                    {
+                        jsonrpc = "2.0",
+                        method = "notifications/initialized"
+                    });
+                    await _stdin.WriteLineAsync(initializedNotification.AsMemory(), timeoutCts.Token);
+                    await _stdin.FlushAsync(timeoutCts.Token);
+
+                    return;
+                }
+
+                // Not a JSON-RPC response - likely debug output, log and continue waiting
+                _logger.LogDebug("Skipping non-JSON-RPC stdout line during init: {Line}", line);
+            }
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new TimeoutException(
+                $"MCP server did not respond to initialize request within {timeoutSeconds} seconds");
+        }
     }
 
     private async Task RunPreExecScriptAsync(string script, CancellationToken cancellationToken)
