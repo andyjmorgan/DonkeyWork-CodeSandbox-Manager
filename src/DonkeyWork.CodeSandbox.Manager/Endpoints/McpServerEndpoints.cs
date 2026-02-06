@@ -72,7 +72,7 @@ public static class McpServerEndpoints
         HttpContext context,
         CancellationToken cancellationToken)
     {
-        logger.LogInformation("Create MCP server endpoint called. LaunchCommand: {Command}", request.LaunchCommand ?? "(none)");
+        logger.LogInformation("Create MCP server endpoint called. Command: {Command}", request.Command ?? "(none)");
 
         context.Response.Headers["Content-Type"] = "text/event-stream";
         context.Response.Headers["Cache-Control"] = "no-cache";

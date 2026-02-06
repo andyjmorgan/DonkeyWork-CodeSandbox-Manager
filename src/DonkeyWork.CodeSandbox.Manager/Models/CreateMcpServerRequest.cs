@@ -3,10 +3,15 @@ namespace DonkeyWork.CodeSandbox.Manager.Models;
 public class CreateMcpServerRequest
 {
     /// <summary>
-    /// The command to launch the MCP stdio server inside the container.
-    /// E.g., "npx -y @modelcontextprotocol/server-filesystem /home/user"
+    /// The command/executable to run (e.g., "npx", "node", "python").
     /// </summary>
-    public string? LaunchCommand { get; set; }
+    public string? Command { get; set; }
+
+    /// <summary>
+    /// Arguments to pass to the command.
+    /// E.g., ["-y", "@modelcontextprotocol/server-filesystem", "/home/user"]
+    /// </summary>
+    public string[] Arguments { get; set; } = [];
 
     /// <summary>
     /// Optional scripts to run before launching the MCP server.

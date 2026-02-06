@@ -28,7 +28,8 @@ export function McpServerDetail({ serverId, creationInfo, onDelete }: McpServerD
   const [isLoadingStatus, setIsLoadingStatus] = useState(false)
 
   // Start (arm) form state
-  const [launchCommand, setLaunchCommand] = useState('')
+  const [command, setCommand] = useState('')
+  const [commandArgs, setCommandArgs] = useState('')
   const [preExecScripts, setPreExecScripts] = useState('')
   const [timeoutSeconds, setTimeoutSeconds] = useState(30)
   const [isStarting, setIsStarting] = useState(false)
@@ -63,16 +64,44 @@ export function McpServerDetail({ serverId, creationInfo, onDelete }: McpServerD
   }, [fetchStatus])
 
   const startMcpProcess = async () => {
-    if (!launchCommand.trim()) return
+    if (!command.trim()) return
     setIsStarting(true)
     setStartError(null)
 
     try {
+      // Parse arguments - split by whitespace but respect quoted strings
+      const parseArgs = (str: string): string[] => {
+        if (!str.trim()) return []
+        const args: string[] = []
+        let current = ''
+        let inQuote = false
+        let quoteChar = ''
+        for (const char of str) {
+          if ((char === '"' || char === "'") && !inQuote) {
+            inQuote = true
+            quoteChar = char
+          } else if (char === quoteChar && inQuote) {
+            inQuote = false
+            quoteChar = ''
+          } else if (char === ' ' && !inQuote) {
+            if (current) {
+              args.push(current)
+              current = ''
+            }
+          } else {
+            current += char
+          }
+        }
+        if (current) args.push(current)
+        return args
+      }
+
       const response = await fetch(`/api/mcp-servers/${serverId}/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          launchCommand: launchCommand.trim(),
+          command: command.trim(),
+          arguments: parseArgs(commandArgs),
           preExecScripts: preExecScripts.trim()
             ? preExecScripts.trim().split('\n').filter(s => s.trim())
             : [],
@@ -268,12 +297,22 @@ export function McpServerDetail({ serverId, creationInfo, onDelete }: McpServerD
             <div className="space-y-3">
               <div>
                 <label className="text-sm font-medium">
-                  Launch Command <span className="text-destructive">*</span>
+                  Command <span className="text-destructive">*</span>
                 </label>
                 <Input
-                  value={launchCommand}
-                  onChange={(e) => setLaunchCommand(e.target.value)}
-                  placeholder="npx -y @modelcontextprotocol/server-filesystem /home/user"
+                  value={command}
+                  onChange={(e) => setCommand(e.target.value)}
+                  placeholder="npx"
+                  className="mt-1 font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="text-sm font-medium">Arguments</label>
+                <Input
+                  value={commandArgs}
+                  onChange={(e) => setCommandArgs(e.target.value)}
+                  placeholder="-y @modelcontextprotocol/server-filesystem /home/user"
                   className="mt-1 font-mono"
                 />
                 <div className="flex flex-wrap gap-2 mt-2">
@@ -281,7 +320,10 @@ export function McpServerDetail({ serverId, creationInfo, onDelete }: McpServerD
                     variant="outline"
                     size="sm"
                     className="text-xs"
-                    onClick={() => setLaunchCommand('npx -y @modelcontextprotocol/server-filesystem /home/user')}
+                    onClick={() => {
+                      setCommand('npx')
+                      setCommandArgs('-y @modelcontextprotocol/server-filesystem /home/user')
+                    }}
                   >
                     Filesystem
                   </Button>
@@ -289,7 +331,10 @@ export function McpServerDetail({ serverId, creationInfo, onDelete }: McpServerD
                     variant="outline"
                     size="sm"
                     className="text-xs"
-                    onClick={() => setLaunchCommand('npx -y @modelcontextprotocol/server-everything')}
+                    onClick={() => {
+                      setCommand('npx')
+                      setCommandArgs('-y @modelcontextprotocol/server-everything')
+                    }}
                   >
                     Everything
                   </Button>
@@ -323,7 +368,7 @@ export function McpServerDetail({ serverId, creationInfo, onDelete }: McpServerD
               <div className="flex items-center gap-2">
                 <Button
                   onClick={startMcpProcess}
-                  disabled={!launchCommand.trim() || isStarting}
+                  disabled={!command.trim() || isStarting}
                 >
                   {isStarting ? (
                     <Loader2 className="h-4 w-4 animate-spin mr-2" />

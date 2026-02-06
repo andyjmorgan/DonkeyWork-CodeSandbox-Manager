@@ -102,13 +102,14 @@ public class McpContainerService : IMcpContainerService
                             ElapsedSeconds = elapsed
                         });
 
-                        // If launch command was provided, start the MCP process
-                        if (!string.IsNullOrWhiteSpace(request.LaunchCommand))
+                        // If command was provided, start the MCP process
+                        if (!string.IsNullOrWhiteSpace(request.Command))
                         {
+                            var commandDisplay = $"{request.Command} {string.Join(" ", request.Arguments)}";
                             writer.TryWrite(new McpServerStartingEvent
                             {
                                 PodName = podName,
-                                Message = $"Starting MCP process: {request.LaunchCommand}"
+                                Message = $"Starting MCP process: {commandDisplay}"
                             });
 
                             try
@@ -122,7 +123,7 @@ public class McpContainerService : IMcpContainerService
                                 writer.TryWrite(new McpServerStartedEvent
                                 {
                                     PodName = podName,
-                                    ServerInfo = MapPodToMcpServerInfo(currentPod, request.LaunchCommand, McpProcessStatus.Ready),
+                                    ServerInfo = MapPodToMcpServerInfo(currentPod, commandDisplay, McpProcessStatus.Ready),
                                     ElapsedSeconds = totalElapsed
                                 });
                             }
@@ -353,18 +354,19 @@ public class McpContainerService : IMcpContainerService
 
     public async Task StartMcpProcessAsync(string podName, McpStartRequest request, CancellationToken cancellationToken = default)
     {
-        _logger.LogInformation("Starting MCP process in {PodName}: {Command}", podName, request.LaunchCommand);
+        var commandDisplay = $"{request.Command} {string.Join(" ", request.Arguments)}";
+        _logger.LogInformation("Starting MCP process in {PodName}: {Command}", podName, commandDisplay);
 
         var podIp = await GetPodIpAsync(podName, cancellationToken);
 
-        // Store launch command in annotation
+        // Store launch command in annotation (for display purposes)
         try
         {
             var nowTimestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString();
             var patch = new V1Patch(
                 JsonSerializer.Serialize(new[]
                 {
-                    new { op = "add", path = $"/metadata/annotations/{PoolManager.McpLaunchCommandAnnotation.Replace("/", "~1")}", value = request.LaunchCommand },
+                    new { op = "add", path = $"/metadata/annotations/{PoolManager.McpLaunchCommandAnnotation.Replace("/", "~1")}", value = commandDisplay },
                     new { op = "replace", path = $"/metadata/annotations/{PoolManager.LastActivityAnnotation.Replace("/", "~1")}", value = nowTimestamp }
                 }),
                 V1Patch.PatchType.JsonPatch);
@@ -380,7 +382,8 @@ public class McpContainerService : IMcpContainerService
 
         await StartMcpProcessOnPodAsync(podIp, new CreateMcpServerRequest
         {
-            LaunchCommand = request.LaunchCommand,
+            Command = request.Command,
+            Arguments = request.Arguments,
             PreExecScripts = request.PreExecScripts,
             TimeoutSeconds = request.TimeoutSeconds
         }, cancellationToken);
@@ -515,9 +518,10 @@ public class McpContainerService : IMcpContainerService
             [PoolManager.LastActivityAnnotation] = nowTimestamp
         };
 
-        if (!string.IsNullOrWhiteSpace(request.LaunchCommand))
+        if (!string.IsNullOrWhiteSpace(request.Command))
         {
-            annotations[PoolManager.McpLaunchCommandAnnotation] = request.LaunchCommand;
+            var commandDisplay = $"{request.Command} {string.Join(" ", request.Arguments)}";
+            annotations[PoolManager.McpLaunchCommandAnnotation] = commandDisplay;
         }
 
         var resourceReqs = _config.McpResourceRequests ?? _config.DefaultResourceRequests;
@@ -576,7 +580,8 @@ public class McpContainerService : IMcpContainerService
         var startPayload = new
         {
             preExecScripts = request.PreExecScripts,
-            launchCommand = request.LaunchCommand,
+            command = request.Command,
+            arguments = request.Arguments,
             timeoutSeconds = request.TimeoutSeconds
         };
 

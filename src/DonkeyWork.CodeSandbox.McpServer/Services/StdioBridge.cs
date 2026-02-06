@@ -64,8 +64,17 @@ public class StdioBridge : IDisposable
             }
 
             // Launch the MCP stdio server process
-            _logger.LogInformation("Launching MCP server: {Command}", request.LaunchCommand);
-            LaunchMcpProcess(request.LaunchCommand);
+            _logger.LogInformation("Launching MCP server: {Command} {Arguments}",
+                request.Command, string.Join(" ", request.Arguments));
+            LaunchMcpProcess(request.Command, request.Arguments);
+
+            // Verify the process is still running after a short delay
+            await Task.Delay(100, cancellationToken);
+            if (_mcpProcess is null || _mcpProcess.HasExited)
+            {
+                var exitCode = _mcpProcess?.ExitCode ?? -1;
+                throw new InvalidOperationException($"MCP process exited immediately with code {exitCode}");
+            }
 
             lock (_stateLock)
             {
@@ -73,7 +82,7 @@ public class StdioBridge : IDisposable
                 _startedAt = DateTime.UtcNow;
             }
 
-            _logger.LogInformation("MCP server is ready");
+            _logger.LogInformation("MCP server is ready (PID: {Pid})", _mcpProcess.Id);
         }
         catch (Exception ex)
         {
@@ -227,18 +236,25 @@ public class StdioBridge : IDisposable
             throw new InvalidOperationException($"Pre-exec script failed with exit code {process.ExitCode}: {script}");
     }
 
-    private void LaunchMcpProcess(string launchCommand)
+    private void LaunchMcpProcess(string command, string[] arguments)
     {
         var workingDirectory = Directory.Exists("/home/user")
             ? "/home/user"
             : Environment.GetEnvironmentVariable("HOME") ?? Path.GetTempPath();
 
+        // Build proper argument string - each argument properly quoted if needed
+        var argumentString = string.Join(" ", arguments.Select(arg =>
+            arg.Contains(' ') || arg.Contains('"') ? $"\"{arg.Replace("\"", "\\\"")}\"" : arg));
+
+        _logger.LogDebug("Starting process: {Command} {Args} in {WorkingDir}",
+            command, argumentString, workingDirectory);
+
         _mcpProcess = new Process
         {
             StartInfo = new ProcessStartInfo
             {
-                FileName = "/bin/bash",
-                Arguments = $"-c \"{launchCommand.Replace("\"", "\\\"")}\"",
+                FileName = command,
+                Arguments = argumentString,
                 WorkingDirectory = workingDirectory,
                 UseShellExecute = false,
                 RedirectStandardInput = true,

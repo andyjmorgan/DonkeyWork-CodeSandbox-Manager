@@ -127,7 +127,8 @@ export interface McpServerInfo {
 export type McpProcessStatus = 'Unknown' | 'Idle' | 'Initializing' | 'Ready' | 'Error' | 'Disposed';
 
 export interface CreateMcpServerRequest {
-  launchCommand?: string;
+  command?: string;
+  arguments?: string[];
   preExecScripts?: string[];
   timeoutSeconds?: number;
   resources?: {
@@ -139,7 +140,8 @@ export interface CreateMcpServerRequest {
 }
 
 export interface McpStartRequest {
-  launchCommand: string;
+  command: string;
+  arguments?: string[];
   preExecScripts?: string[];
   timeoutSeconds?: number;
 }
