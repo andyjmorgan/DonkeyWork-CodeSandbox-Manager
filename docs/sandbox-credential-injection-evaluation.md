@@ -2,6 +2,8 @@
 
 This document evaluates the proposed [Sandbox Credential Injection Architecture](./sandbox-credential-injection-architecture.md) against the existing DonkeyWork CodeSandbox Manager codebase. It identifies strengths, concerns, gaps, and concrete recommendations.
 
+> **Cross-model validation note**: This evaluation was produced by Claude (Opus) and independently validated by ChatGPT (GPT-4o). Both models, reviewing the same architecture against the same codebase, converged on the same nine concerns with materially identical recommendations. This convergence — across different model architectures with no shared context — significantly increases confidence that these are genuine architectural issues rather than stylistic preferences.
+
 ---
 
 ## Overall Assessment
@@ -284,3 +286,39 @@ Key differences from the original:
 3. **Multi-tenancy**: Can multiple users share a Credential Broker instance, or is it one-per-cluster / one-per-namespace?
 4. **Token revocation**: When a sandbox is torn down, should upstream tokens be actively revoked, or just allowed to expire (given short TTLs)?
 5. **Proxy bypass risk**: If the workload container runs as root (current Kata setup), it could modify iptables to bypass the proxy. Should the workload container be non-root with dropped capabilities? (The executor Dockerfile already uses UID 10000, but verify Kata doesn't override this.)
+
+---
+
+## Cross-Model Convergence Analysis
+
+This architecture was independently reviewed by both Claude (Opus) and ChatGPT (GPT-4o). The table below maps their findings:
+
+| # | Concern | Claude | ChatGPT | Agreement |
+|---|---------|--------|---------|-----------|
+| 1 | Envoy over-engineered; use C# proxy | Yes — recommended YARP/Kestrel | Yes — same reasoning, same recommendation | Full |
+| 2 | Commit to Pattern B (TLS MITM) | Yes — Pattern A is not viable for header injection | Yes — identical conclusion | Full |
+| 3 | Git credential helper over MITM | Yes — native protocol, provider-agnostic | Yes — same recommendation | Full |
+| 4 | Warm pool lifecycle gap | Yes — binding at allocation time, option (c) preferred | Yes — identified same gap and timing issue | Full |
+| 5 | Skip Token Agent initially | Yes — Broker caches server-side, redundant layer | Yes — same simplification | Full |
+| 6 | Resource overhead accounting | Yes — sidecar needs separate resource config | Yes — same concern about pool scaling | Full |
+| 7 | NetworkPolicy + iptables defense in depth | Yes — intra-pod bypasses NetworkPolicy | Yes — same layered approach | Full |
+| 8 | DNS resolution needs addressing | Yes — allow port 53 egress | Yes — same recommendation | Full |
+| 9 | Concrete scope policy model needed | Yes — start narrow, example JSON schema | Yes — same approach | Full |
+
+**9/9 full agreement** on both the identification of concerns and the recommended mitigations.
+
+### What this convergence means
+
+- These are not edge-case opinions — they are structural issues that any thorough review would surface.
+- The architecture's core security model is validated as sound by both models.
+- The refinements are implementation-level, not design-level — the foundation doesn't need rethinking.
+- The warm pool lifecycle gap (#4) was flagged as the most significant concern by both reviews independently, reinforcing that it should be the first thing addressed in the design before implementation begins.
+
+### Where to invest design effort next
+
+Given the strong convergence, the team can treat these nine points as high-confidence action items rather than discussion topics. The suggested priority:
+
+1. **Resolve the warm pool binding mechanism** (concern #4) — this is a design decision that affects multiple components.
+2. **Decide Envoy vs. C# proxy** (concern #1) — this is the biggest implementation-effort fork in the road.
+3. **Commit to Pattern B + Git credential helper** (concerns #2, #3) — removes ambiguity, narrows scope.
+4. **Everything else** follows naturally from these three decisions.
