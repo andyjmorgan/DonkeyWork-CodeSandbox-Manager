@@ -56,6 +56,7 @@ jobs:
         run: |
           docker build --network=host -f src/DonkeyWork.CodeSandbox.Server/Dockerfile -t donkeywork-codesandbox-server:test .
           docker build --network=host -f src/DonkeyWork.CodeSandbox.McpServer/Dockerfile -t donkeywork-codesandbox-mcpserver:test .
+          docker build --network=host -f src/DonkeyWork.CodeSandbox.AuthProxy/Dockerfile -t donkeywork-codesandbox-authproxy:test .
 
       - name: Restore dependencies
         run: dotnet restore DonkeyWork.CodeSandbox.sln
@@ -159,6 +160,12 @@ jobs:
             context: .
             title: DonkeyWork CodeSandbox MCP Server
             description: MCP bridge server for AI agent integration
+          - component: authproxy
+            image: donkeywork-codesandbox-authproxy
+            dockerfile: ./src/DonkeyWork.CodeSandbox.AuthProxy/Dockerfile
+            context: .
+            title: DonkeyWork CodeSandbox Auth Proxy
+            description: TLS MITM forward proxy sidecar for credential injection
           - component: frontend
             image: donkeywork-codesandbox-frontend
             dockerfile: ./frontend/Dockerfile
@@ -260,6 +267,7 @@ jobs:
           echo -e "### Manager API\n\`\`\`bash\ndocker pull ${{ env.REGISTRY }}/${{ github.repository_owner }}/donkeywork-codesandbox-manager:${VERSION}\n\`\`\`\n" >> CHANGELOG.md
           echo -e "### Executor\n\`\`\`bash\ndocker pull ${{ env.REGISTRY }}/${{ github.repository_owner }}/donkeywork-codesandbox-executor:${VERSION}\n\`\`\`\n" >> CHANGELOG.md
           echo -e "### MCP Server\n\`\`\`bash\ndocker pull ${{ env.REGISTRY }}/${{ github.repository_owner }}/donkeywork-codesandbox-mcp-server:${VERSION}\n\`\`\`\n" >> CHANGELOG.md
+          echo -e "### Auth Proxy\n\`\`\`bash\ndocker pull ${{ env.REGISTRY }}/${{ github.repository_owner }}/donkeywork-codesandbox-authproxy:${VERSION}\n\`\`\`\n" >> CHANGELOG.md
           echo -e "### Frontend\n\`\`\`bash\ndocker pull ${{ env.REGISTRY }}/${{ github.repository_owner }}/donkeywork-codesandbox-frontend:${VERSION}\n\`\`\`\n" >> CHANGELOG.md
 
           echo "**Platforms:** linux/amd64, linux/arm64" >> CHANGELOG.md
@@ -293,6 +301,7 @@ jobs:
           echo "| Manager | ${{ needs.docker-build.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Executor | ${{ needs.docker-build.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| MCP Server | ${{ needs.docker-build.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Auth Proxy | ${{ needs.docker-build.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Frontend | ${{ needs.docker-build.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| GitHub Release | ${{ needs.create-release.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -301,5 +310,6 @@ jobs:
           echo "docker pull ${{ env.REGISTRY }}/${{ github.repository_owner }}/donkeywork-codesandbox-manager:${VERSION}" >> $GITHUB_STEP_SUMMARY
           echo "docker pull ${{ env.REGISTRY }}/${{ github.repository_owner }}/donkeywork-codesandbox-executor:${VERSION}" >> $GITHUB_STEP_SUMMARY
           echo "docker pull ${{ env.REGISTRY }}/${{ github.repository_owner }}/donkeywork-codesandbox-mcp-server:${VERSION}" >> $GITHUB_STEP_SUMMARY
+          echo "docker pull ${{ env.REGISTRY }}/${{ github.repository_owner }}/donkeywork-codesandbox-authproxy:${VERSION}" >> $GITHUB_STEP_SUMMARY
           echo "docker pull ${{ env.REGISTRY }}/${{ github.repository_owner }}/donkeywork-codesandbox-frontend:${VERSION}" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY

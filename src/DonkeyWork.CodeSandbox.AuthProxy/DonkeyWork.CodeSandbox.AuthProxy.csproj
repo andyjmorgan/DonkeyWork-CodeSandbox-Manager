@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <Nullable>enable</Nullable>
+        <ImplicitUsings>enable</ImplicitUsings>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Serilog.AspNetCore" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <InternalsVisibleTo Include="DonkeyWork.CodeSandbox.AuthProxy.Tests" />
+    </ItemGroup>
+
+</Project>

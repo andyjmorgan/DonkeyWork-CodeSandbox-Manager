@@ -512,11 +512,77 @@ public class KataContainerService : IKataContainerService
             Tty = true
         };
 
+        // Build environment variables: proxy env vars first, then user vars (user overrides)
+        var envVars = new List<V1EnvVar>();
+
+        if (_config.EnableAuthProxy)
+        {
+            envVars.AddRange(new[]
+            {
+                new V1EnvVar { Name = "HTTP_PROXY", Value = $"http://127.0.0.1:{_config.AuthProxyPort}" },
+                new V1EnvVar { Name = "HTTPS_PROXY", Value = $"http://127.0.0.1:{_config.AuthProxyPort}" },
+                new V1EnvVar { Name = "NO_PROXY", Value = "localhost,127.0.0.1" },
+                new V1EnvVar { Name = "NODE_EXTRA_CA_CERTS", Value = "/etc/proxy-ca/ca.crt" },
+            });
+        }
+
         if (request.EnvironmentVariables != null && request.EnvironmentVariables.Count > 0)
         {
-            container.Env = request.EnvironmentVariables
-                .Select(kvp => new V1EnvVar { Name = kvp.Key, Value = kvp.Value })
-                .ToList();
+            envVars.AddRange(request.EnvironmentVariables
+                .Select(kvp => new V1EnvVar { Name = kvp.Key, Value = kvp.Value }));
+        }
+
+        if (envVars.Count > 0)
+        {
+            container.Env = envVars;
+        }
+
+        var containers = new List<V1Container> { container };
+        var volumes = new List<V1Volume>();
+
+        if (_config.EnableAuthProxy)
+        {
+            // Mount CA public cert into workload container
+            container.VolumeMounts = new List<V1VolumeMount>
+            {
+                new()
+                {
+                    Name = "proxy-ca-public",
+                    MountPath = "/etc/proxy-ca",
+                    ReadOnlyProperty = true
+                }
+            };
+
+            // Add sidecar container
+            containers.Add(BuildAuthProxySidecar());
+
+            // Add volumes for CA cert
+            volumes.Add(new V1Volume
+            {
+                Name = "proxy-ca-public",
+                Secret = new V1SecretVolumeSource
+                {
+                    SecretName = _config.AuthProxyCaSecretName,
+                    Items = new List<V1KeyToPath>
+                    {
+                        new() { Key = "tls.crt", Path = "ca.crt" }
+                    }
+                }
+            });
+
+            volumes.Add(new V1Volume
+            {
+                Name = "proxy-ca-full",
+                Secret = new V1SecretVolumeSource
+                {
+                    SecretName = _config.AuthProxyCaSecretName,
+                    Items = new List<V1KeyToPath>
+                    {
+                        new() { Key = "tls.crt", Path = "ca.crt" },
+                        new() { Key = "tls.key", Path = "ca.key" }
+                    }
+                }
+            });
         }
 
         var pod = new V1Pod
@@ -532,11 +598,78 @@ public class KataContainerService : IKataContainerService
             {
                 RuntimeClassName = _config.RuntimeClassName,
                 RestartPolicy = "Never",
-                Containers = new List<V1Container> { container }
+                Containers = containers,
+                Volumes = volumes.Count > 0 ? volumes : null
             }
         };
 
         return pod;
+    }
+
+    private V1Container BuildAuthProxySidecar()
+    {
+        var envVars = new List<V1EnvVar>
+        {
+            new() { Name = "ProxyConfiguration__ProxyPort", Value = _config.AuthProxyPort.ToString() },
+            new() { Name = "ProxyConfiguration__HealthPort", Value = _config.AuthProxyHealthPort.ToString() },
+            new() { Name = "ProxyConfiguration__CaCertificatePath", Value = "/certs/ca.crt" },
+            new() { Name = "ProxyConfiguration__CaPrivateKeyPath", Value = "/certs/ca.key" },
+        };
+
+        // Add allowed domains as indexed environment variables
+        for (int i = 0; i < _config.AuthProxyAllowedDomains.Count; i++)
+        {
+            envVars.Add(new V1EnvVar
+            {
+                Name = $"ProxyConfiguration__AllowedDomains__{i}",
+                Value = _config.AuthProxyAllowedDomains[i]
+            });
+        }
+
+        return new V1Container
+        {
+            Name = "auth-proxy",
+            Image = _config.AuthProxyImage,
+            ImagePullPolicy = "Always",
+            Ports = new List<V1ContainerPort>
+            {
+                new() { ContainerPort = _config.AuthProxyPort },
+                new() { ContainerPort = _config.AuthProxyHealthPort }
+            },
+            Env = envVars,
+            VolumeMounts = new List<V1VolumeMount>
+            {
+                new()
+                {
+                    Name = "proxy-ca-full",
+                    MountPath = "/certs",
+                    ReadOnlyProperty = true
+                }
+            },
+            Resources = new V1ResourceRequirements
+            {
+                Requests = new Dictionary<string, ResourceQuantity>
+                {
+                    ["memory"] = new ResourceQuantity($"{_config.AuthProxySidecarResourceRequests.MemoryMi}Mi"),
+                    ["cpu"] = new ResourceQuantity($"{_config.AuthProxySidecarResourceRequests.CpuMillicores}m")
+                },
+                Limits = new Dictionary<string, ResourceQuantity>
+                {
+                    ["memory"] = new ResourceQuantity($"{_config.AuthProxySidecarResourceLimits.MemoryMi}Mi"),
+                    ["cpu"] = new ResourceQuantity($"{_config.AuthProxySidecarResourceLimits.CpuMillicores}m")
+                }
+            },
+            ReadinessProbe = new V1Probe
+            {
+                HttpGet = new V1HTTPGetAction
+                {
+                    Path = "/healthz",
+                    Port = _config.AuthProxyHealthPort
+                },
+                InitialDelaySeconds = 2,
+                PeriodSeconds = 5
+            }
+        };
     }
 
     private V1ResourceRequirements BuildResourceRequirements(ResourceRequirements? resources)

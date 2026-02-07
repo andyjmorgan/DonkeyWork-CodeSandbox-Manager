@@ -47,5 +47,12 @@ RUN npm install -g \
     typescript \
     ts-node
 
+# Ensure ca-certificates is installed for proxy CA trust
+RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+
+# Copy entrypoint wrapper that handles CA certificate installation
+COPY src/DonkeyWork.CodeSandbox.Server/entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+
 EXPOSE 8666
-ENTRYPOINT ["dotnet", "DonkeyWork.CodeSandbox.Server.dll"]
+ENTRYPOINT ["/app/entrypoint.sh"]

@@ -73,6 +73,29 @@ public class KataContainerManager
     public ResourceConfig? McpResourceRequests { get; set; }
     public ResourceConfig? McpResourceLimits { get; set; }
 
+    // Auth proxy sidecar settings
+    public bool EnableAuthProxy { get; set; } = false;
+
+    public string AuthProxyImage { get; set; } = "ghcr.io/andyjmorgan/donkeywork-codesandbox-authproxy:latest";
+
+    public ResourceConfig AuthProxySidecarResourceRequests { get; set; } = new() { MemoryMi = 64, CpuMillicores = 100 };
+    public ResourceConfig AuthProxySidecarResourceLimits { get; set; } = new() { MemoryMi = 128, CpuMillicores = 250 };
+
+    [Range(1, 65535, ErrorMessage = "Auth proxy port must be between 1 and 65535")]
+    public int AuthProxyPort { get; set; } = 8080;
+
+    [Range(1, 65535, ErrorMessage = "Auth proxy health port must be between 1 and 65535")]
+    public int AuthProxyHealthPort { get; set; } = 8081;
+
+    public List<string> AuthProxyAllowedDomains { get; set; } = new()
+    {
+        "graph.microsoft.com",
+        "api.github.com",
+        "github.com"
+    };
+
+    public string AuthProxyCaSecretName { get; set; } = "sandbox-proxy-ca";
+
     // Optional: Direct k8s connection (alternative to kubeconfig)
     public KubernetesConnectionConfig? Connection { get; set; }
 }
