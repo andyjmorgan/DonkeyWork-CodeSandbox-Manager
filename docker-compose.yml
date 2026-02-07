@@ -71,6 +71,34 @@ services:
     networks:
       - kata-network
 
+  auth-proxy:
+    build:
+      context: .
+      dockerfile: src/DonkeyWork.CodeSandbox.AuthProxy/Dockerfile
+    container_name: auth-proxy
+    ports:
+      - "8080:8080"
+      - "8081:8081"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ProxyConfiguration__ProxyPort=8080
+      - ProxyConfiguration__HealthPort=8081
+      - ProxyConfiguration__AllowedDomains__0=httpbin.org
+      - ProxyConfiguration__AllowedDomains__1=graph.microsoft.com
+      - ProxyConfiguration__AllowedDomains__2=api.github.com
+      - ProxyConfiguration__AllowedDomains__3=github.com
+      - ProxyConfiguration__CaCertificatePath=/certs/ca.crt
+      - ProxyConfiguration__CaPrivateKeyPath=/certs/ca.key
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - kata-network
+
   frontend:
     build:
       context: ./frontend

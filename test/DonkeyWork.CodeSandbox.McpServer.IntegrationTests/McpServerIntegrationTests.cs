@@ -33,15 +33,11 @@ public class McpServerIntegrationTests : IClassFixture<McpServerFixture>
     [Fact]
     public async Task Status_WhenIdle_ReturnsIdleState()
     {
-        // Use a fresh container state — check status before any start
-        // Note: if previous tests started the server, this relies on test ordering
-        // We check the status endpoint returns a valid response
         var response = await _client.GetAsync("/api/mcp/status");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var status = await response.Content.ReadFromJsonAsync<StatusResponse>();
         Assert.NotNull(status);
-        // State should be one of the valid states
         Assert.Contains(status!.State, new[] { "Idle", "Ready", "Initializing", "Error", "Disposed" });
     }
 
@@ -66,6 +62,10 @@ public class McpServerIntegrationTests : IClassFixture<McpServerFixture>
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
+        // Read SSE events to completion
+        var sseBody = await response.Content.ReadAsStringAsync();
+        Assert.Contains("ready", sseBody, StringComparison.OrdinalIgnoreCase);
+
         // Verify status is Ready
         var statusResponse = await _client.GetAsync("/api/mcp/status");
         var status = await statusResponse.Content.ReadFromJsonAsync<StatusResponse>();
@@ -77,7 +77,7 @@ public class McpServerIntegrationTests : IClassFixture<McpServerFixture>
     }
 
     [Fact]
-    public async Task Start_WhenAlreadyStarted_Returns409()
+    public async Task Start_WhenAlreadyStarted_ReturnsErrorEvent()
     {
         await _client.DeleteAsync("/api/mcp");
 
@@ -91,9 +91,12 @@ public class McpServerIntegrationTests : IClassFixture<McpServerFixture>
         var firstResponse = await _client.PostAsJsonAsync("/api/mcp/start", startRequest);
         Assert.Equal(HttpStatusCode.OK, firstResponse.StatusCode);
 
-        // Second start should conflict
+        // Second start should return an SSE error event about already running
         var secondResponse = await _client.PostAsJsonAsync("/api/mcp/start", startRequest);
-        Assert.Equal(HttpStatusCode.Conflict, secondResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, secondResponse.StatusCode);
+        var sseBody = await secondResponse.Content.ReadAsStringAsync();
+        Assert.Contains("error", sseBody, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("already", sseBody, StringComparison.OrdinalIgnoreCase);
 
         // Cleanup
         await _client.DeleteAsync("/api/mcp");
@@ -123,7 +126,7 @@ public class McpServerIntegrationTests : IClassFixture<McpServerFixture>
     }
 
     [Fact]
-    public async Task Start_WithFailingPreExec_ReturnsError()
+    public async Task Start_WithFailingPreExec_ReturnsErrorEvent()
     {
         await _client.DeleteAsync("/api/mcp");
 
@@ -135,7 +138,11 @@ public class McpServerIntegrationTests : IClassFixture<McpServerFixture>
         };
 
         var response = await _client.PostAsJsonAsync("/api/mcp/start", startRequest);
-        Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        // SSE stream should contain an error event
+        var sseBody = await response.Content.ReadAsStringAsync();
+        Assert.Contains("error", sseBody, StringComparison.OrdinalIgnoreCase);
 
         // Status should be Error
         var statusResponse = await _client.GetAsync("/api/mcp/status");
@@ -407,7 +414,7 @@ public class McpServerIntegrationTests : IClassFixture<McpServerFixture>
         await StartMcpServerAsync();
 
         var content = new StringContent("", Encoding.UTF8, "application/json");
-        var response = await _client.PostAsync("/api/mcp", content);
+        var response = await _client.PostAsync("/mcp", content);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
 
@@ -457,6 +464,14 @@ public class McpServerIntegrationTests : IClassFixture<McpServerFixture>
 
         var response = await _client.PostAsJsonAsync("/api/mcp/start", startRequest);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        // Consume the SSE stream to completion so the server finishes starting
+        await response.Content.ReadAsStringAsync();
+
+        // Wait for status to be Ready
+        var statusResponse = await _client.GetAsync("/api/mcp/status");
+        var status = await statusResponse.Content.ReadFromJsonAsync<StatusResponse>();
+        Assert.Equal("Ready", status!.State);
     }
 
     private async Task SendInitializeHandshakeAsync()
@@ -485,7 +500,7 @@ public class McpServerIntegrationTests : IClassFixture<McpServerFixture>
     private async Task<HttpResponseMessage> SendJsonRpcAsync(string jsonRpcBody)
     {
         var content = new StringContent(jsonRpcBody, Encoding.UTF8, "application/json");
-        return await _client.PostAsync("/api/mcp", content);
+        return await _client.PostAsync("/mcp", content);
     }
 
     private static string BuildJsonRpc(string method, int id, object? @params = null)
