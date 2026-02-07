@@ -117,7 +117,15 @@ public class McpContainerService : IMcpContainerService
                                 var podIp = currentPod.Status?.PodIP
                                     ?? throw new InvalidOperationException("Pod has no IP");
 
-                                await StartMcpProcessOnPodAsync(podIp, request, cancellationToken);
+                                // Consume SSE events from the MCP server start and forward to the creation stream
+                                await foreach (var startEvt in StartMcpProcessOnPodSseAsync(podIp, request, cancellationToken))
+                                {
+                                    writer.TryWrite(new McpServerStartingEvent
+                                    {
+                                        PodName = podName,
+                                        Message = $"[{startEvt.EventType}] {startEvt.Message}"
+                                    });
+                                }
 
                                 var totalElapsed = (DateTime.UtcNow - startTime).TotalSeconds;
                                 writer.TryWrite(new McpServerStartedEvent
@@ -352,12 +360,22 @@ public class McpContainerService : IMcpContainerService
         return null;
     }
 
-    public async Task StartMcpProcessAsync(string podName, McpStartRequest request, CancellationToken cancellationToken = default)
+    public async IAsyncEnumerable<McpStartProcessEvent> StartMcpProcessAsync(
+        string podName,
+        McpStartRequest request,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         var commandDisplay = $"{request.Command} {string.Join(" ", request.Arguments)}";
         _logger.LogInformation("Starting MCP process in {PodName}: {Command}", podName, commandDisplay);
 
         var podIp = await GetPodIpAsync(podName, cancellationToken);
+        var podUrl = $"http://{podIp}:8666";
+
+        yield return new McpStartProcessEvent
+        {
+            EventType = "connecting",
+            Message = $"Connecting to {podUrl}"
+        };
 
         // Store launch command in annotation (for display purposes)
         try
@@ -380,13 +398,16 @@ public class McpContainerService : IMcpContainerService
             _logger.LogWarning(ex, "Failed to store launch command annotation for {PodName}", podName);
         }
 
-        await StartMcpProcessOnPodAsync(podIp, new CreateMcpServerRequest
+        await foreach (var evt in StartMcpProcessOnPodSseAsync(podIp, new CreateMcpServerRequest
         {
             Command = request.Command,
             Arguments = request.Arguments,
             PreExecScripts = request.PreExecScripts,
             TimeoutSeconds = request.TimeoutSeconds
-        }, cancellationToken);
+        }, cancellationToken))
+        {
+            yield return evt;
+        }
     }
 
     public async Task<string> ProxyMcpRequestAsync(string podName, string jsonRpcBody, CancellationToken cancellationToken = default)
@@ -398,7 +419,7 @@ public class McpContainerService : IMcpContainerService
 
         var httpClient = _httpClientFactory.CreateClient();
         var response = await httpClient.PostAsync(
-            $"http://{podIp}:8666/api/mcp/",
+            $"http://{podIp}:8666/mcp",
             new StringContent(jsonRpcBody, Encoding.UTF8, "application/json"),
             cancellationToken);
 
@@ -433,7 +454,7 @@ public class McpContainerService : IMcpContainerService
         var podIp = await GetPodIpAsync(podName, cancellationToken);
         var httpClient = _httpClientFactory.CreateClient();
         var response = await httpClient.DeleteAsync(
-            $"http://{podIp}:8666/api/mcp/",
+            $"http://{podIp}:8666/api/mcp",
             cancellationToken);
         response.EnsureSuccessStatusCode();
     }
@@ -574,7 +595,10 @@ public class McpContainerService : IMcpContainerService
         };
     }
 
-    private async Task StartMcpProcessOnPodAsync(string podIp, CreateMcpServerRequest request, CancellationToken cancellationToken)
+    private async IAsyncEnumerable<McpStartProcessEvent> StartMcpProcessOnPodSseAsync(
+        string podIp,
+        CreateMcpServerRequest request,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
     {
         var httpClient = _httpClientFactory.CreateClient();
         var startPayload = new
@@ -586,15 +610,49 @@ public class McpContainerService : IMcpContainerService
         };
 
         var json = JsonSerializer.Serialize(startPayload);
-        var response = await httpClient.PostAsync(
-            $"http://{podIp}:8666/api/mcp/start",
-            new StringContent(json, Encoding.UTF8, "application/json"),
-            cancellationToken);
+        using var requestMessage = new HttpRequestMessage(HttpMethod.Post, $"http://{podIp}:8666/api/mcp/start")
+        {
+            Content = new StringContent(json, Encoding.UTF8, "application/json")
+        };
+
+        using var response = await httpClient.SendAsync(requestMessage, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
 
         if (!response.IsSuccessStatusCode)
         {
             var error = await response.Content.ReadAsStringAsync(cancellationToken);
             throw new InvalidOperationException($"MCP start failed ({response.StatusCode}): {error}");
+        }
+
+        using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var reader = new StreamReader(stream);
+
+        string? line;
+        while ((line = await reader.ReadLineAsync(cancellationToken)) is not null)
+        {
+
+            if (string.IsNullOrWhiteSpace(line))
+                continue;
+
+            if (!line.StartsWith("data: "))
+                continue;
+
+            var eventJson = line["data: ".Length..];
+            McpStartProcessEvent? evt;
+            try
+            {
+                evt = JsonSerializer.Deserialize<McpStartProcessEvent>(eventJson, new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true
+                });
+            }
+            catch (JsonException ex)
+            {
+                _logger.LogWarning(ex, "Failed to deserialize MCP start SSE event: {Json}", eventJson);
+                continue;
+            }
+
+            if (evt is not null)
+                yield return evt;
         }
     }
 

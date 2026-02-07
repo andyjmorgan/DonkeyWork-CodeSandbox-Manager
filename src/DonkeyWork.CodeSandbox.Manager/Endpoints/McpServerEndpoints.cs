@@ -42,7 +42,7 @@ public static class McpServerEndpoints
         group.MapPost("/{podName}/start", StartMcpProcess)
             .WithName("StartMcpProcess")
             .WithSummary("Start (arm) the MCP process inside a container")
-            .WithDescription("Sends the launch command and pre-exec scripts to start the MCP stdio process inside an already-running container.");
+            .WithDescription("Sends the launch command and pre-exec scripts to start the MCP stdio process inside an already-running container. Returns SSE stream with startup events.");
 
         group.MapPost("/{podName}/proxy", ProxyMcpRequest)
             .WithName("ProxyMcpRequest")
@@ -194,22 +194,50 @@ public static class McpServerEndpoints
         }
     }
 
-    private static async Task<Results<Ok, ProblemHttpResult>> StartMcpProcess(
+    private static async Task StartMcpProcess(
         string podName,
         McpStartRequest request,
         IMcpContainerService mcpService,
         ILogger<Program> logger,
+        HttpContext context,
         CancellationToken cancellationToken)
     {
+        context.Response.Headers["Content-Type"] = "text/event-stream";
+        context.Response.Headers["Cache-Control"] = "no-cache";
+        context.Response.Headers["Connection"] = "keep-alive";
+
         try
         {
-            await mcpService.StartMcpProcessAsync(podName, request, cancellationToken);
-            return TypedResults.Ok();
+            await foreach (var evt in mcpService.StartMcpProcessAsync(podName, request, cancellationToken))
+            {
+                var json = System.Text.Json.JsonSerializer.Serialize(evt, new System.Text.Json.JsonSerializerOptions
+                {
+                    PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase
+                });
+
+                var sseMessage = $"data: {json}\n\n";
+                await context.Response.Body.WriteAsync(System.Text.Encoding.UTF8.GetBytes(sseMessage), cancellationToken);
+                await context.Response.Body.FlushAsync(cancellationToken);
+            }
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "Failed to start MCP process in {PodName}", podName);
-            return TypedResults.Problem(detail: ex.Message, statusCode: 500, title: "Failed to start MCP process");
+
+            var errorEvent = new McpStartProcessEvent
+            {
+                EventType = "error",
+                Message = ex.Message
+            };
+
+            var json = System.Text.Json.JsonSerializer.Serialize(errorEvent, new System.Text.Json.JsonSerializerOptions
+            {
+                PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase
+            });
+
+            var sseMessage = $"data: {json}\n\n";
+            await context.Response.Body.WriteAsync(System.Text.Encoding.UTF8.GetBytes(sseMessage), cancellationToken);
+            await context.Response.Body.FlushAsync(cancellationToken);
         }
     }
 

@@ -18,8 +18,9 @@ public interface IMcpContainerService
 
     /// <summary>
     /// Arms an MCP server container by calling POST /api/mcp/start with the given launch command/args.
+    /// Streams SSE events from the MCP server during startup.
     /// </summary>
-    Task StartMcpProcessAsync(string podName, McpStartRequest request, CancellationToken cancellationToken = default);
+    IAsyncEnumerable<McpStartProcessEvent> StartMcpProcessAsync(string podName, McpStartRequest request, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Proxies a raw JSON-RPC request body to the MCP server inside the container.

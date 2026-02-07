@@ -36,6 +36,9 @@ export function McpServerDetail({ serverId, creationInfo, onDelete }: McpServerD
   const [startError, setStartError] = useState<string | null>(null)
   const [isStopping, setIsStopping] = useState(false)
 
+  // Start events state
+  const [startEvents, setStartEvents] = useState<Array<{ eventType: string; message: string; stream?: string; pid?: number; elapsedSeconds?: number }>>([])
+
   // Proxy state
   const [proxyBody, setProxyBody] = useState('{\n  "jsonrpc": "2.0",\n  "method": "tools/list",\n  "id": 1\n}')
   const [proxyExecutions, setProxyExecutions] = useState<ProxyExecution[]>([])
@@ -67,35 +70,36 @@ export function McpServerDetail({ serverId, creationInfo, onDelete }: McpServerD
     if (!command.trim()) return
     setIsStarting(true)
     setStartError(null)
+    setStartEvents([])
+
+    // Parse arguments - split by whitespace but respect quoted strings
+    const parseArgs = (str: string): string[] => {
+      if (!str.trim()) return []
+      const args: string[] = []
+      let current = ''
+      let inQuote = false
+      let quoteChar = ''
+      for (const char of str) {
+        if ((char === '"' || char === "'") && !inQuote) {
+          inQuote = true
+          quoteChar = char
+        } else if (char === quoteChar && inQuote) {
+          inQuote = false
+          quoteChar = ''
+        } else if (char === ' ' && !inQuote) {
+          if (current) {
+            args.push(current)
+            current = ''
+          }
+        } else {
+          current += char
+        }
+      }
+      if (current) args.push(current)
+      return args
+    }
 
     try {
-      // Parse arguments - split by whitespace but respect quoted strings
-      const parseArgs = (str: string): string[] => {
-        if (!str.trim()) return []
-        const args: string[] = []
-        let current = ''
-        let inQuote = false
-        let quoteChar = ''
-        for (const char of str) {
-          if ((char === '"' || char === "'") && !inQuote) {
-            inQuote = true
-            quoteChar = char
-          } else if (char === quoteChar && inQuote) {
-            inQuote = false
-            quoteChar = ''
-          } else if (char === ' ' && !inQuote) {
-            if (current) {
-              args.push(current)
-              current = ''
-            }
-          } else {
-            current += char
-          }
-        }
-        if (current) args.push(current)
-        return args
-      }
-
       const response = await fetch(`/api/mcp-servers/${serverId}/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -109,9 +113,37 @@ export function McpServerDetail({ serverId, creationInfo, onDelete }: McpServerD
         }),
       })
 
-      if (!response.ok) {
+      if (!response.ok && !response.headers.get('content-type')?.includes('text/event-stream')) {
         const errorText = await response.text()
         throw new Error(errorText || `HTTP ${response.status}`)
+      }
+
+      const reader = response.body?.getReader()
+      if (!reader) throw new Error('No response body')
+
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue
+          try {
+            const evt = JSON.parse(line.slice(6))
+            setStartEvents(prev => [...prev, evt])
+            if (evt.eventType === 'error') {
+              setStartError(evt.message)
+            }
+          } catch {
+            // skip malformed events
+          }
+        }
       }
 
       await fetchStatus()
@@ -383,6 +415,34 @@ export function McpServerDetail({ serverId, creationInfo, onDelete }: McpServerD
                 <div className="flex items-center gap-2 text-destructive text-sm">
                   <XCircle className="h-4 w-4" />
                   <span>{startError}</span>
+                </div>
+              )}
+
+              {/* Start Events Log */}
+              {startEvents.length > 0 && (
+                <div className="border border-border rounded-lg bg-muted/20 p-3 max-h-[250px] overflow-auto">
+                  <div className="text-xs text-muted-foreground mb-2">Startup Events:</div>
+                  <ul className="space-y-1 font-mono text-xs">
+                    {startEvents.map((evt, idx) => (
+                      <li key={idx} className="flex items-start gap-2">
+                        <span className={cn(
+                          "shrink-0 px-1.5 py-0.5 rounded",
+                          evt.eventType === 'ready' && "bg-green-500/20 text-green-600 dark:text-green-400",
+                          evt.eventType === 'error' && "bg-red-500/20 text-red-600 dark:text-red-400",
+                          evt.eventType.startsWith('handshake') && "bg-blue-500/20 text-blue-600 dark:text-blue-400",
+                          evt.eventType.startsWith('process') && "bg-purple-500/20 text-purple-600 dark:text-purple-400",
+                          evt.eventType.startsWith('pre_exec') && "bg-yellow-500/20 text-yellow-600 dark:text-yellow-400",
+                          evt.eventType === 'mcp_stderr' && "bg-orange-500/20 text-orange-600 dark:text-orange-400",
+                        )}>
+                          {evt.eventType}
+                        </span>
+                        <span className="break-all">{evt.message}</span>
+                        {evt.elapsedSeconds != null && (
+                          <span className="shrink-0 text-muted-foreground">{evt.elapsedSeconds.toFixed(1)}s</span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
                 </div>
               )}
             </div>

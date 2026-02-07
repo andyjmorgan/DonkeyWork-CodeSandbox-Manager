@@ -1,0 +1,14 @@
+services:
+  mcp-server:
+    build:
+      context: .
+      dockerfile: src/DonkeyWork.CodeSandbox.McpServer/Dockerfile
+    container_name: mcp-server-debug
+    ports:
+      - "8666:8666"
+    environment:
+      - ASPNETCORE_URLS=http://+:8666
+      - ASPNETCORE_ENVIRONMENT=Development
+      - Serilog__MinimumLevel__Default=Debug
+      - Serilog__MinimumLevel__Override__Microsoft=Warning
+      - Serilog__MinimumLevel__Override__System=Warning
