@@ -185,6 +185,10 @@ public class StdioBridge : IDisposable
         if (requestId is null)
             throw new InvalidOperationException("Could not extract id from JSON-RPC request");
 
+        // Extract method name for logging
+        var method = ExtractMethod(jsonRpcRequest);
+        _logger.LogInformation("Sending request id={Id} method={Method}, registering TCS", requestId, method);
+
         // Register the TCS BEFORE writing to stdin to avoid a race where
         // the background reader sees the response before the TCS is registered.
         var tcs = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -194,6 +198,7 @@ public class StdioBridge : IDisposable
         {
             // Now write request to stdin (synchronized to prevent interleaving)
             await WriteToStdinAsync(jsonRpcRequest, cancellationToken);
+            _logger.LogInformation("Written request id={Id} to stdin, pending count={Count}", requestId, _pendingRequests.Count);
 
             lock (_stateLock)
                 _lastRequestAt = DateTime.UtcNow;
@@ -276,6 +281,7 @@ public class StdioBridge : IDisposable
 
         _ = Task.Run(async () =>
         {
+            _logger.LogInformation("Background stdout reader started");
             try
             {
                 while (!ct.IsCancellationRequested)
@@ -306,17 +312,19 @@ public class StdioBridge : IDisposable
                     if (string.IsNullOrWhiteSpace(line))
                         continue;
 
+                    _logger.LogInformation("Stdout received line ({Length} chars)", line.Length);
+
                     // Try to parse as JSON-RPC
                     if (!TryParseJsonRpc(line, out var hasId, out var id, out var isResponse, out var hasMethod))
                     {
-                        _logger.LogDebug("Skipping non-JSON-RPC stdout line: {Line}", line);
+                        _logger.LogWarning("Skipping non-JSON-RPC stdout line: {Line}", line);
                         continue;
                     }
 
                     if (isResponse && id is not null && _pendingRequests.TryRemove(id, out var tcs))
                     {
                         // This is a response to a pending request
-                        _logger.LogDebug("Routing response for id={Id}", id);
+                        _logger.LogInformation("Routing response for id={Id}, pending remaining={Count}", id, _pendingRequests.Count);
                         tcs.TrySetResult(line);
                     }
                     else if (hasMethod)
@@ -622,6 +630,21 @@ public class StdioBridge : IDisposable
                     _ => idProp.GetRawText()
                 };
             }
+            return null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string? ExtractMethod(string json)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.TryGetProperty("method", out var methodProp))
+                return methodProp.GetString();
             return null;
         }
         catch

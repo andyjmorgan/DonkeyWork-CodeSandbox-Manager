@@ -46,5 +46,10 @@ app.UseCors();
 app.MapMcpEndpoints();
 app.UseHealthChecks("/healthz");
 
-Log.Information("Starting MCP stdio-to-HTTP bridge on port 8666");
+var assembly = typeof(StdioBridge).Assembly;
+var version = assembly.GetName().Version?.ToString() ?? "unknown";
+var informationalVersion = assembly.GetCustomAttributes(false)
+    .OfType<System.Reflection.AssemblyInformationalVersionAttribute>()
+    .FirstOrDefault()?.InformationalVersion ?? version;
+Log.Information("Starting MCP stdio-to-HTTP bridge on port 8666 (build: {Version})", informationalVersion);
 await app.RunAsync();
