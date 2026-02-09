@@ -168,14 +168,14 @@ public class StdioBridge : IDisposable
 
         EnsureProcessAlive();
 
-        // Write request to stdin (synchronized to prevent interleaving)
-        await WriteToStdinAsync(jsonRpcRequest, cancellationToken);
-
-        lock (_stateLock)
-            _lastRequestAt = DateTime.UtcNow;
-
         if (isNotification)
         {
+            // Fire-and-forget: write to stdin, no response expected
+            await WriteToStdinAsync(jsonRpcRequest, cancellationToken);
+
+            lock (_stateLock)
+                _lastRequestAt = DateTime.UtcNow;
+
             _logger.LogDebug("Sent notification (no response expected)");
             return null;
         }
@@ -185,11 +185,19 @@ public class StdioBridge : IDisposable
         if (requestId is null)
             throw new InvalidOperationException("Could not extract id from JSON-RPC request");
 
+        // Register the TCS BEFORE writing to stdin to avoid a race where
+        // the background reader sees the response before the TCS is registered.
         var tcs = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
         _pendingRequests[requestId] = tcs;
 
         try
         {
+            // Now write request to stdin (synchronized to prevent interleaving)
+            await WriteToStdinAsync(jsonRpcRequest, cancellationToken);
+
+            lock (_stateLock)
+                _lastRequestAt = DateTime.UtcNow;
+
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeoutCts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
 
