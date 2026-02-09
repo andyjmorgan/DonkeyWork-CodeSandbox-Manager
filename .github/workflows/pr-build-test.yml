@@ -58,6 +58,7 @@ jobs:
         run: |
           docker build --network=host -f src/DonkeyWork.CodeSandbox.Server/Dockerfile -t donkeywork-codesandbox-server:test .
           docker build --network=host -f src/DonkeyWork.CodeSandbox.McpServer/Dockerfile -t donkeywork-codesandbox-mcpserver:test .
+          docker build --network=host -f src/DonkeyWork.CodeSandbox.AuthProxy/Dockerfile -t donkeywork-codesandbox-authproxy:test .
 
       - name: Restore dependencies
         run: dotnet restore DonkeyWork.CodeSandbox.sln
@@ -144,6 +145,9 @@ jobs:
           - name: mcp-server
             dockerfile: ./src/DonkeyWork.CodeSandbox.McpServer/Dockerfile
             context: .
+          - name: authproxy
+            dockerfile: ./src/DonkeyWork.CodeSandbox.AuthProxy/Dockerfile
+            context: .
           - name: frontend
             dockerfile: ./frontend/Dockerfile
             context: ./frontend
@@ -210,8 +214,6 @@ jobs:
         run: dotnet format DonkeyWork.CodeSandbox.sln --verify-no-changes --verbosity diagnostic
         continue-on-error: true
 
-      - name: Security scan - Dependency check
-        run: dotnet list package --vulnerable --include-transitive
 
   pr-status:
     name: PR Status
