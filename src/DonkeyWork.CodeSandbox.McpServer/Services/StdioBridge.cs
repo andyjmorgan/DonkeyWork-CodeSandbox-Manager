@@ -187,6 +187,16 @@ public class StdioBridge : IDisposable
 
         // Extract method name for logging
         var method = ExtractMethod(jsonRpcRequest);
+
+        // Handle ping at the bridge level - not all MCP servers respond to ping
+        if (method == "ping")
+        {
+            _logger.LogInformation("Handling ping request id={Id} at bridge level", requestId);
+            lock (_stateLock) _lastRequestAt = DateTime.UtcNow;
+            var rawId = ExtractRawId(jsonRpcRequest);
+            return $"{{\"jsonrpc\":\"2.0\",\"result\":{{}},\"id\":{rawId}}}";
+        }
+
         _logger.LogInformation("Sending request id={Id} method={Method}, registering TCS", requestId, method);
 
         // Register the TCS BEFORE writing to stdin to avoid a race where
@@ -636,6 +646,12 @@ public class StdioBridge : IDisposable
         {
             return null;
         }
+    }
+
+    private static string ExtractRawId(string json)
+    {
+        using var doc = JsonDocument.Parse(json);
+        return doc.RootElement.GetProperty("id").GetRawText();
     }
 
     private static string? ExtractMethod(string json)
