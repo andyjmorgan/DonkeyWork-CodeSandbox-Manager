@@ -227,6 +227,29 @@ public class McpServerIntegrationTests : IClassFixture<McpServerFixture>
     }
 
     [Fact]
+    public async Task Proxy_Ping_ReturnsEmptyResult()
+    {
+        await StartMcpServerAsync();
+        await SendInitializeHandshakeAsync();
+
+        var jsonRpc = BuildJsonRpc("ping", 10);
+
+        var response = await SendJsonRpcAsync(jsonRpc);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var body = await response.Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(body);
+        var root = doc.RootElement;
+
+        Assert.Equal("2.0", root.GetProperty("jsonrpc").GetString());
+        Assert.Equal(10, root.GetProperty("id").GetInt32());
+        Assert.True(root.TryGetProperty("result", out _));
+
+        // Cleanup
+        await _client.DeleteAsync("/api/mcp");
+    }
+
+    [Fact]
     public async Task Proxy_ToolsList_ReturnsTools()
     {
         await StartMcpServerAsync();
