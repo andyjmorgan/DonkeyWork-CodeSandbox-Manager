@@ -24,6 +24,11 @@ public class StdioBridge : IDisposable
     private Channel<string>? _notificationChannel;
     private CancellationTokenSource? _stdoutReaderCts;
 
+    // Keepalive timer to prevent child process stdin/stdout pipes from going stale
+    private Timer? _keepaliveTimer;
+    private const int KeepAliveIntervalSeconds = 30;
+    private long _keepaliveCounter;
+
     public McpServerState State
     {
         get { lock (_stateLock) return _state; }
@@ -131,8 +136,9 @@ public class StdioBridge : IDisposable
             Emit("handshake_starting", "Sending initialize handshake...");
             await WaitForMcpReadyAsync(request.TimeoutSeconds, events, cancellationToken);
 
-            // Handshake complete - now start the background stdout reader
+            // Handshake complete - now start the background stdout reader and keepalive
             StartStdoutReader();
+            StartKeepaliveTimer();
 
             lock (_stateLock)
             {
@@ -372,6 +378,66 @@ public class StdioBridge : IDisposable
                 _notificationChannel?.Writer.TryComplete();
             }
         }, ct);
+    }
+
+    private void StartKeepaliveTimer()
+    {
+        _keepaliveTimer = new Timer(
+            _ => SendKeepalive(),
+            null,
+            TimeSpan.FromSeconds(KeepAliveIntervalSeconds),
+            TimeSpan.FromSeconds(KeepAliveIntervalSeconds));
+    }
+
+    private async void SendKeepalive()
+    {
+        try
+        {
+            if (State != McpServerState.Ready)
+                return;
+
+            if (_mcpProcess is null || _mcpProcess.HasExited)
+                return;
+
+            var counter = Interlocked.Increment(ref _keepaliveCounter);
+            var keepaliveId = $"__keepalive_{counter}__";
+
+            var pingRequest = JsonSerializer.Serialize(new
+            {
+                jsonrpc = "2.0",
+                id = keepaliveId,
+                method = "ping"
+            });
+
+            _logger.LogDebug("Sending keepalive ping (id={Id})", keepaliveId);
+
+            var tcs = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _pendingRequests[keepaliveId] = tcs;
+
+            try
+            {
+                await WriteToStdinAsync(pingRequest, CancellationToken.None);
+
+                using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                await using var registration = timeoutCts.Token.Register(() =>
+                    tcs.TrySetCanceled(timeoutCts.Token));
+
+                await tcs.Task;
+                _logger.LogDebug("Keepalive ping response received (id={Id})", keepaliveId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Keepalive ping failed (id={Id})", keepaliveId);
+            }
+            finally
+            {
+                _pendingRequests.TryRemove(keepaliveId, out _);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Keepalive timer callback failed");
+        }
     }
 
     private Task WaitForMcpReadyAsync(int timeoutSeconds, CancellationToken cancellationToken)
@@ -711,6 +777,10 @@ public class StdioBridge : IDisposable
 
     private void KillMcpProcess()
     {
+        // Stop the keepalive timer
+        _keepaliveTimer?.Dispose();
+        _keepaliveTimer = null;
+
         // Stop the background reader
         _stdoutReaderCts?.Cancel();
         _stdoutReaderCts?.Dispose();
