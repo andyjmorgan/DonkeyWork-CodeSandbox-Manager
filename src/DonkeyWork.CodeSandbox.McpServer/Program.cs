@@ -42,6 +42,20 @@ builder.Services.AddHealthChecks();
 
 var app = builder.Build();
 
+app.UseSerilogRequestLogging(options =>
+{
+    options.GetLevel = (httpContext, elapsed, ex) =>
+    {
+        var path = httpContext.Request.Path.Value ?? "";
+        if (path.Equals("/healthz", StringComparison.OrdinalIgnoreCase) ||
+            path.Equals("/api/mcp/status", StringComparison.OrdinalIgnoreCase))
+        {
+            return Serilog.Events.LogEventLevel.Debug;
+        }
+        return Serilog.Events.LogEventLevel.Information;
+    };
+});
+
 app.UseCors();
 app.MapMcpEndpoints();
 app.UseHealthChecks("/healthz");

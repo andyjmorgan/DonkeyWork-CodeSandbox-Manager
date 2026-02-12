@@ -95,7 +95,18 @@ Log.Information("Configuration loaded: Namespace={Namespace}, RuntimeClass={Runt
     config.TargetNamespace, config.RuntimeClassName);
 
 // Configure HTTP pipeline
-app.UseSerilogRequestLogging();
+app.UseSerilogRequestLogging(options =>
+{
+    options.GetLevel = (httpContext, elapsed, ex) =>
+    {
+        var path = httpContext.Request.Path.Value ?? "";
+        if (path.Equals("/healthz", StringComparison.OrdinalIgnoreCase))
+        {
+            return Serilog.Events.LogEventLevel.Debug;
+        }
+        return Serilog.Events.LogEventLevel.Information;
+    };
+});
 
 // Enable OpenAPI and Scalar
 app.MapOpenApi();

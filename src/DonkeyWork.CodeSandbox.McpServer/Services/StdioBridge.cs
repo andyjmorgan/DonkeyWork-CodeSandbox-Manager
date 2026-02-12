@@ -194,18 +194,21 @@ public class StdioBridge : IDisposable
         // Extract method name for logging
         var method = ExtractMethod(jsonRpcRequest);
 
-        _logger.LogInformation("Sending request id={Id} method={Method}, registering TCS", requestId, method);
+        var bodyTruncated = jsonRpcRequest.Length > 500 ? jsonRpcRequest[..500] + "...(truncated)" : jsonRpcRequest;
+        _logger.LogInformation("SendRequestAsync: id={Id} method={Method}, body={Body}", requestId, method, bodyTruncated);
 
         // Register the TCS BEFORE writing to stdin to avoid a race where
         // the background reader sees the response before the TCS is registered.
         var tcs = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
         _pendingRequests[requestId] = tcs;
+        _logger.LogInformation("SendRequestAsync: TCS registered for id={Id}, pending keys=[{Keys}]", requestId, string.Join(",", _pendingRequests.Keys));
 
         try
         {
             // Now write request to stdin (synchronized to prevent interleaving)
             await WriteToStdinAsync(jsonRpcRequest, cancellationToken);
-            _logger.LogInformation("Written request id={Id} to stdin, pending count={Count}", requestId, _pendingRequests.Count);
+            _logger.LogInformation("SendRequestAsync: written to stdin, id={Id}, pending count={Count}, waiting for response (timeout={Timeout}s)...",
+                requestId, _pendingRequests.Count, timeoutSeconds);
 
             lock (_stateLock)
                 _lastRequestAt = DateTime.UtcNow;
@@ -214,12 +217,20 @@ public class StdioBridge : IDisposable
             timeoutCts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
 
             await using var registration = timeoutCts.Token.Register(() =>
-                tcs.TrySetCanceled(timeoutCts.Token));
+            {
+                _logger.LogWarning("SendRequestAsync: TIMEOUT triggered for id={Id} after {Timeout}s", requestId, timeoutSeconds);
+                tcs.TrySetCanceled(timeoutCts.Token);
+            });
 
-            return await tcs.Task;
+            var result = await tcs.Task;
+            var resultTruncated = result.Length > 500 ? result[..500] + "...(truncated)" : result;
+            _logger.LogInformation("SendRequestAsync: response received for id={Id}: {Response}", requestId, resultTruncated);
+            return result;
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
+            _logger.LogError("SendRequestAsync: TIMED OUT for id={Id} method={Method} after {Timeout}s. Pending keys=[{Keys}]",
+                requestId, method, timeoutSeconds, string.Join(",", _pendingRequests.Keys));
             throw new TimeoutException("Timed out waiting for MCP server response");
         }
         finally
@@ -267,11 +278,16 @@ public class StdioBridge : IDisposable
 
     private async Task WriteToStdinAsync(string message, CancellationToken cancellationToken)
     {
+        var truncated = message.Length > 500 ? message[..500] + "...(truncated)" : message;
+        _logger.LogInformation("WriteToStdinAsync: writing {Length} chars: {Content}", message.Length, truncated);
+
         await _stdinLock.WaitAsync(cancellationToken);
         try
         {
             await _stdin!.WriteLineAsync(message.AsMemory(), cancellationToken);
+            _logger.LogInformation("WriteToStdinAsync: WriteLineAsync complete, flushing...");
             await _stdin.FlushAsync(cancellationToken);
+            _logger.LogInformation("WriteToStdinAsync: flush complete");
         }
         finally
         {
@@ -319,7 +335,8 @@ public class StdioBridge : IDisposable
                     if (string.IsNullOrWhiteSpace(line))
                         continue;
 
-                    _logger.LogInformation("Stdout received line ({Length} chars)", line.Length);
+                    var lineTruncated = line.Length > 500 ? line[..500] + "...(truncated)" : line;
+                    _logger.LogInformation("Stdout received line ({Length} chars): {Content}", line.Length, lineTruncated);
 
                     // Try to parse as JSON-RPC
                     if (!TryParseJsonRpc(line, out var hasId, out var id, out var isResponse, out var hasMethod))
@@ -328,26 +345,29 @@ public class StdioBridge : IDisposable
                         continue;
                     }
 
+                    _logger.LogInformation("Stdout parsed: hasId={HasId}, id={Id}, isResponse={IsResponse}, hasMethod={HasMethod}, pendingKeys=[{Keys}]",
+                        hasId, id, isResponse, hasMethod, string.Join(",", _pendingRequests.Keys));
+
                     if (isResponse && id is not null && _pendingRequests.TryRemove(id, out var tcs))
                     {
                         // This is a response to a pending request
-                        _logger.LogInformation("Routing response for id={Id}, pending remaining={Count}", id, _pendingRequests.Count);
+                        _logger.LogInformation("Routing response for id={Id} to TCS, pending remaining={Count}", id, _pendingRequests.Count);
                         tcs.TrySetResult(line);
                     }
                     else if (hasMethod)
                     {
                         // Server-initiated notification or request
-                        _logger.LogDebug("Server message received: {Line}", line);
+                        _logger.LogInformation("Server notification/request received: {Line}", lineTruncated);
                         _notificationChannel?.Writer.TryWrite(line);
                     }
                     else if (isResponse)
                     {
                         // Response to an unknown/expired request
-                        _logger.LogWarning("Received response for unknown request id={Id}", id);
+                        _logger.LogWarning("Received response for unknown/expired request id={Id}, pendingKeys=[{Keys}]", id, string.Join(",", _pendingRequests.Keys));
                     }
                     else
                     {
-                        _logger.LogDebug("Skipping unrecognized JSON-RPC message: {Line}", line);
+                        _logger.LogWarning("Skipping unrecognized JSON-RPC message: {Line}", lineTruncated);
                     }
                 }
             }
@@ -409,7 +429,7 @@ public class StdioBridge : IDisposable
                 method = "ping"
             });
 
-            _logger.LogDebug("Sending keepalive ping (id={Id})", keepaliveId);
+            _logger.LogInformation("Sending keepalive ping (id={Id})", keepaliveId);
 
             var tcs = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
             _pendingRequests[keepaliveId] = tcs;
@@ -423,7 +443,7 @@ public class StdioBridge : IDisposable
                     tcs.TrySetCanceled(timeoutCts.Token));
 
                 await tcs.Task;
-                _logger.LogDebug("Keepalive ping response received (id={Id})", keepaliveId);
+                _logger.LogInformation("Keepalive ping response received (id={Id})", keepaliveId);
             }
             catch (Exception ex)
             {
@@ -479,11 +499,13 @@ public class StdioBridge : IDisposable
 
         try
         {
+            _logger.LogInformation("WaitForMcpReadyAsync: sending initialize request: {Request}", initializeRequest);
+
             // Write the initialize request to stdin
             await _stdin!.WriteLineAsync(initializeRequest.AsMemory(), timeoutCts.Token);
             await _stdin.FlushAsync(timeoutCts.Token);
 
-            _logger.LogDebug("Sent initialize probe, waiting for response...");
+            _logger.LogInformation("WaitForMcpReadyAsync: initialize probe written and flushed, waiting for response...");
             Emit("handshake_sent", "Initialize probe sent, waiting for response...");
 
             // Read response from stdout - wait for valid JSON-RPC response
@@ -505,10 +527,13 @@ public class StdioBridge : IDisposable
                 if (string.IsNullOrWhiteSpace(line))
                     continue;
 
+                var lineTruncated = line.Length > 500 ? line[..500] + "...(truncated)" : line;
+                _logger.LogInformation("WaitForMcpReadyAsync: received stdout line ({Length} chars): {Content}", line.Length, lineTruncated);
+
                 // Check if this is a valid JSON-RPC response to our initialize request
                 if (IsJsonRpcResponse(line))
                 {
-                    _logger.LogInformation("MCP server responded to initialize probe");
+                    _logger.LogInformation("WaitForMcpReadyAsync: got initialize response: {Response}", lineTruncated);
                     Emit("handshake_response", "Server responded to initialize probe");
 
                     // Send the initialized notification to complete the handshake
@@ -517,15 +542,17 @@ public class StdioBridge : IDisposable
                         jsonrpc = "2.0",
                         method = "notifications/initialized"
                     });
+                    _logger.LogInformation("WaitForMcpReadyAsync: sending initialized notification: {Notification}", initializedNotification);
                     await _stdin.WriteLineAsync(initializedNotification.AsMemory(), timeoutCts.Token);
                     await _stdin.FlushAsync(timeoutCts.Token);
+                    _logger.LogInformation("WaitForMcpReadyAsync: initialized notification sent and flushed");
 
                     Emit("handshake_complete", "Handshake complete");
                     return;
                 }
 
                 // Not a JSON-RPC response - likely debug output, log and continue waiting
-                _logger.LogDebug("Skipping non-JSON-RPC stdout line during init: {Line}", line);
+                _logger.LogInformation("WaitForMcpReadyAsync: skipping non-JSON-RPC line during init: {Line}", lineTruncated);
                 Emit("stdout_line", line, "stdout");
             }
         }
@@ -635,6 +662,9 @@ public class StdioBridge : IDisposable
 
         _mcpProcess.Start();
         _stdin = _mcpProcess.StandardInput;
+
+        _logger.LogInformation("Stdin stream: Encoding={Encoding}, AutoFlush={AutoFlush}, BaseStream.CanWrite={CanWrite}",
+            _stdin.Encoding.EncodingName, _stdin.AutoFlush, _stdin.BaseStream.CanWrite);
 
         // Drain stderr to logs and events in background
         _ = Task.Run(async () =>

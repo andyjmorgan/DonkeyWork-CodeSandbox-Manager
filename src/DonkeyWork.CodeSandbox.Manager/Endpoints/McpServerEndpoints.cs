@@ -253,6 +253,10 @@ public static class McpServerEndpoints
             using var reader = new StreamReader(context.Request.Body);
             var body = await reader.ReadToEndAsync(cancellationToken);
 
+            var bodyTruncated = body.Length > 500 ? body[..500] + "...(truncated)" : body;
+            logger.LogInformation("ProxyMcpRequest endpoint: podName={PodName}, body ({Length} chars): {Body}",
+                podName, body.Length, bodyTruncated);
+
             var response = await mcpService.ProxyMcpRequestAsync(podName, body, cancellationToken);
 
             context.Response.ContentType = "application/json";

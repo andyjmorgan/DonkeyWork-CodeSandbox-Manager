@@ -414,6 +414,10 @@ public class McpContainerService : IMcpContainerService
     {
         var podIp = await GetPodIpAsync(podName, cancellationToken);
 
+        var bodyTruncated = jsonRpcBody.Length > 500 ? jsonRpcBody[..500] + "...(truncated)" : jsonRpcBody;
+        _logger.LogInformation("ProxyMcpRequestAsync: pod={PodName} ip={PodIp}, sending {Length} chars: {Body}",
+            podName, podIp, jsonRpcBody.Length, bodyTruncated);
+
         // Update last activity
         _ = UpdateLastActivityAsync(podName, cancellationToken);
 
@@ -423,14 +427,27 @@ public class McpContainerService : IMcpContainerService
             new StringContent(jsonRpcBody, Encoding.UTF8, "application/json"),
             cancellationToken);
 
+        _logger.LogInformation("ProxyMcpRequestAsync: pod={PodName} response status={StatusCode}", podName, response.StatusCode);
+
         if (response.StatusCode == HttpStatusCode.Accepted)
         {
-            // Notification - no response body
+            _logger.LogInformation("ProxyMcpRequestAsync: pod={PodName} notification accepted (202)", podName);
             return "{}";
         }
 
-        response.EnsureSuccessStatusCode();
-        return await response.Content.ReadAsStringAsync(cancellationToken);
+        var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
+        var responseTruncated = responseBody.Length > 500 ? responseBody[..500] + "...(truncated)" : responseBody;
+
+        if (!response.IsSuccessStatusCode)
+        {
+            _logger.LogError("ProxyMcpRequestAsync: pod={PodName} non-success response {StatusCode}: {ResponseBody}",
+                podName, response.StatusCode, responseTruncated);
+            throw new HttpRequestException($"MCP proxy request failed with {response.StatusCode}: {responseTruncated}");
+        }
+
+        _logger.LogInformation("ProxyMcpRequestAsync: pod={PodName} success, response {Length} chars: {Response}",
+            podName, responseBody.Length, responseTruncated);
+        return responseBody;
     }
 
     public async Task<McpStatusResponse> GetMcpStatusAsync(string podName, CancellationToken cancellationToken = default)
