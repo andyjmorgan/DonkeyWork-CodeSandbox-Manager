@@ -131,6 +131,19 @@ public static class McpEndpoints
             return Results.BadRequest(new { error = "Request body is empty" });
         }
 
+        // Compact the JSON to a single line — stdio MCP servers expect one JSON-RPC message per line.
+        // Pretty-printed JSON with embedded newlines would be split across multiple stdin lines,
+        // causing the MCP process to receive incomplete/unparseable fragments.
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            body = JsonSerializer.Serialize(doc.RootElement);
+        }
+        catch (JsonException)
+        {
+            return Results.BadRequest(new { error = "Request body is not valid JSON" });
+        }
+
         try
         {
             var response = await bridge.SendRequestAsync(body, bridge.GetStatus().State == McpServerState.Ready ? 30 : 10, cancellationToken);
